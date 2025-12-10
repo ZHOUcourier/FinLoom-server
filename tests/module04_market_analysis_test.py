@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Module 04 Market Analysis Comprehensive Test
 模块04市场分析综合测试
@@ -24,8 +25,15 @@ import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
+# 设置 Windows 控制台 UTF-8 编码支持
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
+
 # Add project root to path
-sys.path.append("/Users/victor/Desktop/25fininnov/FinLoom-server")
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
 # Configure logging
 logging.basicConfig(

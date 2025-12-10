@@ -2,6 +2,8 @@
 系统常量定义
 """
 
+import os
+
 # 交易相关常量
 TRADING_DAYS_PER_YEAR = 252
 MINUTES_PER_TRADING_DAY = 240  # 4小时交易时间
@@ -32,7 +34,7 @@ DEFAULT_API_PORT = 8000
 DEFAULT_API_HOST = "0.0.0.0"
 
 # 数据库常量
-DEFAULT_DB_PATH = "data/finloom.db"
+DEFAULT_DB_PATH = os.path.join("data", "finloom.db")
 MAX_DB_CONNECTIONS = 10
 
 # 缓存常量

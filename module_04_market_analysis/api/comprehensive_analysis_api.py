@@ -236,10 +236,11 @@ async def initialize_analyzers():
         logger.info("Analysis engine initialization completed")
 
 
-@router.on_event("startup")
-async def startup_event():
-    """启动事件"""
-    await initialize_analyzers()
+# ❌ 移除自动启动初始化，改为延迟加载避免启动卡顿
+# @router.on_event("startup")
+# async def startup_event():
+#     """启动事件"""
+#     await initialize_analyzers()
 
 
 @router.post("/anomaly/detect")

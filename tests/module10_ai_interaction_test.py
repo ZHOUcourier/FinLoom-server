@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Module 10 AI交互模块测试文件
 测试所有组件的功能
@@ -23,6 +24,12 @@ Module 10 AI交互模块测试文件
 
 import sys
 from pathlib import Path
+
+# 设置 Windows 控制台 UTF-8 编码支持
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
@@ -419,7 +426,7 @@ def test_conversation_history():
     print("\n========== 测试对话历史管理 ==========")
 
     history_mgr = ConversationHistoryManager(
-        storage_path="data/test_conversation_history", storage_type="sqlite"
+        storage_path=os.path.join("data", "test_conversation_history"), storage_type="sqlite"
     )
 
     # 创建测试记录

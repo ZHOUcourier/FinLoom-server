@@ -476,6 +476,155 @@ class ConversationHistoryManager:
             return records[-limit:]
         return records
 
+    def _load_user_history_sqlite(
+        self,
+        user_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> List[ConversationRecord]:
+        """从SQLite加载用户历史
+
+        Args:
+            user_id: 用户ID
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 限制数量
+
+        Returns:
+            对话记录列表
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM conversations WHERE user_id = ?"
+        params = [user_id]
+
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(start_date.isoformat())
+
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(end_date.isoformat())
+
+        query += " ORDER BY timestamp DESC"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        records = []
+        for row in rows:
+            records.append(self._row_to_record(row))
+
+        return records
+
+    def _load_user_history_memory(
+        self,
+        user_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> List[ConversationRecord]:
+        """从内存加载用户历史
+
+        Args:
+            user_id: 用户ID
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 限制数量
+
+        Returns:
+            对话记录列表
+        """
+        all_records = []
+        for session_records in self.memory_storage.values():
+            for record in session_records:
+                if record.user_id == user_id:
+                    if start_date and record.timestamp < start_date:
+                        continue
+                    if end_date and record.timestamp > end_date:
+                        continue
+                    all_records.append(record)
+
+        # 按时间戳排序
+        all_records.sort(key=lambda x: x.timestamp, reverse=True)
+
+        if limit:
+            return all_records[:limit]
+        return all_records
+
+    def _search_sqlite(
+        self, query: str, user_id: Optional[str] = None, limit: int = 10
+    ) -> List[ConversationRecord]:
+        """从SQLite搜索对话
+
+        Args:
+            query: 搜索关键词
+            user_id: 用户ID（可选）
+            limit: 限制数量
+
+        Returns:
+            匹配的对话记录
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        sql_query = """
+            SELECT * FROM conversations
+            WHERE (user_input LIKE ? OR system_response LIKE ?)
+        """
+        params = [f"%{query}%", f"%{query}%"]
+
+        if user_id:
+            sql_query += " AND user_id = ?"
+            params.append(user_id)
+
+        sql_query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(sql_query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        records = []
+        for row in rows:
+            records.append(self._row_to_record(row))
+
+        return records
+
+    def _search_memory(
+        self, query: str, user_id: Optional[str] = None, limit: int = 10
+    ) -> List[ConversationRecord]:
+        """从内存搜索对话
+
+        Args:
+            query: 搜索关键词
+            user_id: 用户ID（可选）
+            limit: 限制数量
+
+        Returns:
+            匹配的对话记录
+        """
+        matched_records = []
+
+        for session_records in self.memory_storage.values():
+            for record in session_records:
+                if user_id and record.user_id != user_id:
+                    continue
+
+                if query.lower() in record.user_input.lower() or query.lower() in record.system_response.lower():
+                    matched_records.append(record)
+
+        # 按时间戳排序
+        matched_records.sort(key=lambda x: x.timestamp, reverse=True)
+
+        return matched_records[:limit]
+
     def _row_to_record(self, row: tuple) -> ConversationRecord:
         """将数据库行转换为记录对象
 

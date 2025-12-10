@@ -1,0 +1,28 @@
+{
+  "greeting": {
+    "templates": [
+      "您好！我是FinLoom的智能投资顾问，由FIN-R1金融推理模型驱动。我可以帮您分析投资需求、评估风险、提供专业的投资建议。请告诉我您的投资想法？",
+      "欢迎使用FinLoom！我将运用FIN-R1模型为您提供专业的金融分析和投资建议。请描述您的投资需求。"
+    ]
+  },
+  "clarification": {
+    "risk_tolerance": "关于风险承受能力，您是偏向于：1) 保守型（优先保本）2) 稳健型（平衡收益与风险）3) 激进型（追求高收益）？",
+    "investment_horizon": "您的投资期限是多久？1) 短期（1年内）2) 中期（1-3年）3) 长期（3年以上）？",
+    "investment_amount": "请问您计划投入多少资金？",
+    "investment_goals": "您的主要投资目标是什么？（例如：资本增值、稳定收益、养老规划等）"
+  },
+  "reasoning_prompts": {
+    "market_analysis": "基于当前市场状况，让我为您分析...",
+    "risk_assessment": "从风险角度来看...",
+    "strategy_recommendation": "综合考虑您的需求，我建议..."
+  },
+  "disclaimer": {
+    "template": "⚠️ 投资有风险，入市需谨慎。以上分析和建议仅供参考，不构成投资决策依据。请您根据自身情况审慎决策。"
+  },
+  "error_messages": {
+    "model_not_loaded": "抱歉，FIN-R1模型暂时不可用。正在使用备用分析方案为您服务。",
+    "insufficient_info": "为了提供更准确的建议，我需要了解更多信息。",
+    "invalid_request": "抱歉，我没有理解您的需求。请您换个方式描述一下？"
+  }
+}
+

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API测试 - FinLoom</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+        .section h2 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        .loading {
+            color: #666;
+        }
+        .success {
+            color: #4caf50;
+        }
+        .error {
+            color: #f44336;
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        button {
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1565c0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 FinLoom API 测试页面</h1>
+        
+        <div>
+            <button onclick="testAllAPIs()">🔄 测试所有API</button>
+            <button onclick="testSectorAPI()">📊 板块分析</button>
+            <button onclick="testSentimentAPI()">💭 市场情绪</button>
+            <button onclick="testIndicatorsAPI()">📈 技术指标</button>
+            <button onclick="testNewsAPI()">📰 市场资讯</button>
+        </div>
+
+        <div id="sectorSection" class="section">
+            <h2>1. 板块分析 API</h2>
+            <div id="sectorResult" class="loading">等待测试...</div>
+        </div>
+
+        <div id="sentimentSection" class="section">
+            <h2>2. 市场情绪 API</h2>
+            <div id="sentimentResult" class="loading">等待测试...</div>
+        </div>
+
+        <div id="indicatorsSection" class="section">
+            <h2>3. 技术指标 API</h2>
+            <div id="indicatorsResult" class="loading">等待测试...</div>
+        </div>
+
+        <div id="newsSection" class="section">
+            <h2>4. 市场资讯 API</h2>
+            <div id="newsResult" class="loading">等待测试...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+
+        async function testSectorAPI() {
+            const result = document.getElementById('sectorResult');
+            result.innerHTML = '<span class="loading">加载中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/market/sector-analysis`);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.data.sectors && data.data.sectors.length > 0) {
+                    let html = '<div class="success">✅ 成功获取数据</div>';
+                    html += `<p>共 ${data.data.sectors.length} 个板块</p>`;
+                    html += '<h3>板块列表：</h3><ul>';
+                    
+                    data.data.sectors.forEach(sector => {
+                        const changeClass = sector.change >= 0 ? 'success' : 'error';
+                        html += `<li><strong>${sector.name}</strong>: <span class="${changeClass}">${sector.change.toFixed(2)}%</span> (${sector.count}只股票)</li>`;
+                    });
+                    
+                    html += '</ul>';
+                    html += `<details><summary>查看完整JSON</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+                    result.innerHTML = html;
+                } else {
+                    result.innerHTML = '<div class="error">❌ 未获取到数据</div>';
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ 请求失败: ${error.message}</div>`;
+            }
+        }
+
+        async function testSentimentAPI() {
+            const result = document.getElementById('sentimentResult');
+            result.innerHTML = '<span class="loading">加载中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/market/market-sentiment`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    let html = '<div class="success">✅ 成功获取数据</div>';
+                    html += `<p><strong>恐慌贪婪指数:</strong> ${data.data.fear_greed_index}</p>`;
+                    html += `<p><strong>上涨股票:</strong> <span class="success">${data.data.advancing_stocks}</span></p>`;
+                    html += `<p><strong>下跌股票:</strong> <span class="error">${data.data.declining_stocks}</span></p>`;
+                    html += `<details><summary>查看完整JSON</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+                    result.innerHTML = html;
+                } else {
+                    result.innerHTML = '<div class="error">❌ 未获取到数据</div>';
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ 请求失败: ${error.message}</div>`;
+            }
+        }
+
+        async function testIndicatorsAPI() {
+            const result = document.getElementById('indicatorsResult');
+            result.innerHTML = '<span class="loading">加载中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/market/technical-indicators`);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.data.indicators) {
+                    let html = '<div class="success">✅ 成功获取数据</div>';
+                    html += `<p>基于: ${data.data.based_on}</p>`;
+                    html += '<h3>技术指标：</h3><ul>';
+                    
+                    data.data.indicators.forEach(indicator => {
+                        html += `<li><strong>${indicator.name}</strong>: ${indicator.value} (${indicator.signal})</li>`;
+                    });
+                    
+                    html += '</ul>';
+                    html += `<details><summary>查看完整JSON</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+                    result.innerHTML = html;
+                } else {
+                    result.innerHTML = '<div class="error">❌ 未获取到数据</div>';
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ 请求失败: ${error.message}</div>`;
+            }
+        }
+
+        async function testNewsAPI() {
+            const result = document.getElementById('newsResult');
+            result.innerHTML = '<span class="loading">加载中...</span>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/market/market-news?limit=10`);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.data.news) {
+                    let html = '<div class="success">✅ 成功获取数据</div>';
+                    html += `<p>共 ${data.data.news.length} 条资讯</p>`;
+                    html += '<h3>资讯列表：</h3><ul>';
+                    
+                    data.data.news.forEach(news => {
+                        html += `<li><strong>${news.title}</strong><br>${news.summary.substring(0, 100)}...</li>`;
+                    });
+                    
+                    html += '</ul>';
+                    html += `<details><summary>查看完整JSON</summary><pre>${JSON.stringify(data, null, 2)}</pre></details>`;
+                    result.innerHTML = html;
+                } else {
+                    result.innerHTML = '<div class="error">❌ 未获取到数据</div>';
+                }
+            } catch (error) {
+                result.innerHTML = `<div class="error">❌ 请求失败: ${error.message}</div>`;
+            }
+        }
+
+        async function testAllAPIs() {
+            await Promise.all([
+                testSectorAPI(),
+                testSentimentAPI(),
+                testIndicatorsAPI(),
+                testNewsAPI()
+            ]);
+        }
+
+        // 页面加载时自动测试
+        window.addEventListener('load', () => {
+            console.log('页面加载完成，开始测试API...');
+            testAllAPIs();
+        });
+    </script>
+</body>
+</html>
+

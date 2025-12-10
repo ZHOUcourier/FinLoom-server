@@ -1,12 +1,6 @@
 # 模型配置文件
 
-# FIN-R1模型配置
-fin_r1:
-  model_path: ".Fin-R1"
-  device: "cpu"  # or "cuda" if GPU available
-  batch_size: 32
-  max_length: 512
-  temperature: 0.7
+# FIN-R1模型配置已移除，现在统一使用阿里云AI服务
 
 # 特征工程配置
 feature_engineering:

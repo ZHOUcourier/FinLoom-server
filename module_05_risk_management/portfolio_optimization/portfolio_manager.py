@@ -47,7 +47,7 @@ class PortfolioMetrics:
 class PortfolioManager:
     """投资组合管理器类"""
     
-    def __init__(self, config: PortfolioConfig = None, db_path: str = "data/portfolio.db"):
+    def __init__(self, config: PortfolioConfig = None, db_path: str = None):
         """初始化投资组合管理器
         
         Args:
@@ -55,6 +55,9 @@ class PortfolioManager:
             db_path: 数据库路径
         """
         self.config = config or PortfolioConfig()
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "portfolio.db")
         self.db_path = db_path
         self.positions: Dict[str, Position] = {}
         self.cash = 0.0

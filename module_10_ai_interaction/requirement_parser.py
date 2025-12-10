@@ -73,33 +73,41 @@ class ParsedRequirement:
     min_liquidity: Optional[float] = None
     tax_considerations: bool = False
     esg_preferences: Optional[str] = None
+    backtest_start_date: Optional[datetime] = None  # 回测开始日期
+    backtest_end_date: Optional[datetime] = None  # 回测结束日期
     confidence_scores: Dict[str, float] = field(default_factory=dict)
     extracted_entities: Dict[str, Any] = field(default_factory=dict)
     clarification_needed: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
             "timestamp": self.timestamp.isoformat(),
             "raw_input": self.raw_input,
             "investment_amount": self.investment_amount,
-            "investment_horizon": self.investment_horizon.value if self.investment_horizon else None,
-            "risk_tolerance": self.risk_tolerance.value if self.risk_tolerance else None,
+            "investment_horizon": self.investment_horizon.value
+            if self.investment_horizon
+            else None,
+            "risk_tolerance": self.risk_tolerance.value
+            if self.risk_tolerance
+            else None,
             "investment_goals": [
                 {
                     "goal_type": goal.goal_type,
                     "target_return": goal.target_return,
                     "priority": goal.priority,
-                    "description": goal.description
-                } for goal in self.investment_goals
+                    "description": goal.description,
+                }
+                for goal in self.investment_goals
             ],
             "constraints": [
                 {
                     "constraint_type": constraint.constraint_type,
                     "constraint_value": constraint.constraint_value,
                     "is_hard_constraint": constraint.is_hard_constraint,
-                    "description": constraint.description
-                } for constraint in self.constraints
+                    "description": constraint.description,
+                }
+                for constraint in self.constraints
             ],
             "preferred_assets": self.preferred_assets,
             "excluded_assets": self.excluded_assets,
@@ -109,9 +117,15 @@ class ParsedRequirement:
             "min_liquidity": self.min_liquidity,
             "tax_considerations": self.tax_considerations,
             "esg_preferences": self.esg_preferences,
+            "backtest_start_date": self.backtest_start_date.isoformat()
+            if self.backtest_start_date
+            else None,
+            "backtest_end_date": self.backtest_end_date.isoformat()
+            if self.backtest_end_date
+            else None,
             "confidence_scores": self.confidence_scores,
             "extracted_entities": self.extracted_entities,
-            "clarification_needed": self.clarification_needed
+            "clarification_needed": self.clarification_needed,
         }
 
 
@@ -166,30 +180,35 @@ class RequirementParser:
 
     def parse_requirement(self, text: str) -> ParsedRequirement:
         """解析用户需求
-        
+
         Args:
             text: 用户输入文本
-            
+
         Returns:
             解析后的需求对象
         """
         try:
             parsed = ParsedRequirement(timestamp=datetime.now(), raw_input=text)
-            
+
             # 提取各种信息
             parsed.investment_amount = self._extract_amount(text)
             parsed.investment_horizon = self._extract_time_horizon(text)
-            
+
             risk_tolerance, risk_confidence = self.extract_risk_preferences(text)
             parsed.risk_tolerance = risk_tolerance
             parsed.confidence_scores["risk_tolerance"] = risk_confidence
-            
+
             goals, goals_confidence = self.parse_investment_goals(text)
             parsed.investment_goals = goals
             parsed.confidence_scores["goals"] = goals_confidence
-            
+
             parsed.constraints = self.identify_constraints(text)
-            
+
+            # 提取回测日期
+            start_date, end_date = self._extract_backtest_dates(text)
+            parsed.backtest_start_date = start_date
+            parsed.backtest_end_date = end_date
+
             # 检查是否需要澄清
             if not parsed.investment_amount:
                 parsed.clarification_needed.append("investment_amount")
@@ -197,13 +216,13 @@ class RequirementParser:
                 parsed.clarification_needed.append("risk_tolerance")
             if not parsed.investment_horizon:
                 parsed.clarification_needed.append("investment_horizon")
-            
+
             return parsed
-            
+
         except Exception as e:
             logger.error(f"Failed to parse requirement: {e}")
             raise QuantSystemError(f"Requirement parsing failed: {e}")
-    
+
     def parse_investment_goals(self, text: str) -> Tuple[List[InvestmentGoal], float]:
         """解析投资目标
 
@@ -585,6 +604,131 @@ class RequirementParser:
                         return InvestmentHorizon.LONG_TERM
 
         return None
+
+    def _extract_backtest_dates(
+        self, text: str
+    ) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """提取回测日期
+
+        Args:
+            text: 输入文本
+
+        Returns:
+            (开始日期, 结束日期)
+        """
+        start_date = None
+        end_date = None
+
+        # 尝试匹配多种日期格式
+        date_patterns = [
+            r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",  # 2023年1月1日
+            r"(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})",  # 2023-01-01, 2023/01/01, 2023年01月01日
+            r"(\d{4})\s*[年./-]\s*(\d{1,2})",  # 2023年1月, 2023-01
+        ]
+
+        # 寻找"回测时间"或类似关键词附近的日期
+        backtest_keywords = [
+            "回测时间",
+            "回测日期",
+            "时间范围",
+            "日期范围",
+            "测试期间",
+            "从.*到",
+            "至",
+        ]
+
+        # 查找回测时间段描述
+        for keyword in backtest_keywords:
+            if keyword in text:
+                # 找到关键词后的文本段
+                idx = text.find(keyword)
+                relevant_text = text[idx : idx + 100] if idx != -1 else text
+
+                # 尝试提取日期
+                for pattern in date_patterns:
+                    matches = re.findall(pattern, relevant_text)
+                    if len(matches) >= 2:
+                        # 找到两个日期，分别作为开始和结束
+                        try:
+                            if len(matches[0]) == 3:
+                                start_date = datetime(
+                                    int(matches[0][0]),
+                                    int(matches[0][1]),
+                                    int(matches[0][2]),
+                                )
+                            elif len(matches[0]) == 2:
+                                start_date = datetime(
+                                    int(matches[0][0]), int(matches[0][1]), 1
+                                )
+
+                            if len(matches[1]) == 3:
+                                end_date = datetime(
+                                    int(matches[1][0]),
+                                    int(matches[1][1]),
+                                    int(matches[1][2]),
+                                )
+                            elif len(matches[1]) == 2:
+                                end_date = datetime(
+                                    int(matches[1][0]), int(matches[1][1]), 1
+                                )
+                        except (ValueError, IndexError):
+                            continue
+
+                        if start_date and end_date:
+                            logger.info(
+                                f"📅 提取到回测日期: {start_date.date()} 至 {end_date.date()}"
+                            )
+                            return start_date, end_date
+                    elif len(matches) == 1:
+                        # 只找到一个日期，可能是开始日期
+                        try:
+                            if len(matches[0]) == 3:
+                                date = datetime(
+                                    int(matches[0][0]),
+                                    int(matches[0][1]),
+                                    int(matches[0][2]),
+                                )
+                            elif len(matches[0]) == 2:
+                                date = datetime(
+                                    int(matches[0][0]), int(matches[0][1]), 1
+                                )
+
+                            if start_date is None:
+                                start_date = date
+                            else:
+                                end_date = date
+                        except (ValueError, IndexError):
+                            continue
+
+        # 如果没有找到明确的回测关键词，尝试在整个文本中查找日期对
+        if not start_date or not end_date:
+            all_dates = []
+            for pattern in date_patterns:
+                matches = re.findall(pattern, text)
+                for match in matches:
+                    try:
+                        if len(match) == 3:
+                            date = datetime(int(match[0]), int(match[1]), int(match[2]))
+                        elif len(match) == 2:
+                            date = datetime(int(match[0]), int(match[1]), 1)
+                        else:
+                            continue
+                        # 只接受合理的历史日期（不接受未来日期）
+                        if date <= datetime.now():
+                            all_dates.append(date)
+                    except (ValueError, IndexError):
+                        continue
+
+            # 如果找到至少两个日期，选择最早和最晚的
+            if len(all_dates) >= 2:
+                all_dates.sort()
+                start_date = all_dates[0]
+                end_date = all_dates[-1]
+                logger.info(
+                    f"📅 从文本提取到回测日期: {start_date.date()} 至 {end_date.date()}"
+                )
+
+        return start_date, end_date
 
     def _calculate_keyword_relevance(self, text: str, keyword: str) -> float:
         """计算关键词相关性

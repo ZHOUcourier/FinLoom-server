@@ -86,7 +86,7 @@ class ReportGenerator:
     def __init__(
         self,
         template_dir: str = "templates",
-        output_dir: str = "module_06_monitoring_alerting/reports",
+        output_dir: str = None,
     ):
         """初始化报告生成器
 
@@ -94,6 +94,8 @@ class ReportGenerator:
             template_dir: 模板目录
             output_dir: 输出目录
         """
+        if output_dir is None:
+            output_dir = os.path.join("module_06_monitoring_alerting", "reports")
         self.template_dir = template_dir
         self.output_dir = output_dir
         self.env = Environment(loader=FileSystemLoader(template_dir))

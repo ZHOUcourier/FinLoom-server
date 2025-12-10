@@ -76,8 +76,8 @@ class PerformanceMetrics:
 class ReportBuilder:
     """报告生成器类 - 默认输出JSON数据和SQLite数据库"""
 
-    OUTPUT_DIR = "module_11_visualization/reports"  # 数据文件输出目录
-    DATABASE_PATH = "data/module11_visualization.db"  # SQLite数据库路径
+    OUTPUT_DIR = os.path.join("module_11_visualization", "reports")  # 数据文件输出目录
+    DATABASE_PATH = os.path.join("data", "module11_visualization.db")  # SQLite数据库路径
 
     def __init__(self, output_dir: Optional[str] = None, db_path: Optional[str] = None):
         """初始化报告生成器

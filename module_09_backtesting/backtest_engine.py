@@ -2,7 +2,6 @@
 回测引擎模块
 """
 
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -50,6 +49,7 @@ class BacktestResult:
     win_rate: float
     profit_factor: float
     total_trades: int
+    win_loss_ratio: float = 0.0  # 盈亏比
     performance_metrics: Dict[str, float] = field(default_factory=dict)
     equity_curve: pd.DataFrame = field(default_factory=pd.DataFrame)
     daily_returns: pd.Series = field(default_factory=pd.Series)
@@ -60,22 +60,44 @@ class BacktestResult:
 class BacktestEngine:
     """回测引擎类"""
 
-    def __init__(self, config: BacktestConfig):
+    def __init__(
+        self,
+        config: BacktestConfig,
+        strategy_func: Optional[Callable] = None,
+        risk_controller: Optional[Any] = None,
+    ):
         """初始化回测引擎
 
         Args:
             config: 回测配置
+            strategy_func: 策略函数
+            risk_controller: 风险控制器（可选）
         """
         self.config = config
+        self.strategy_func = strategy_func
+        self.market_data: Dict[str, pd.DataFrame] = {}
+        self.risk_controller = risk_controller  # 新增：风险控制器
+
+        # 生成唯一的backtest_id
+        import uuid
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = uuid.uuid4().hex[:8]
+        self.backtest_id = (
+            f"{config.strategy_name.replace(' ', '_')}_{timestamp}_{unique_id}"
+        )
+
+        # 回测状态
         self.current_capital = config.initial_capital
         self.positions: Dict[str, Position] = {}
-        self.equity_curve = []
-        self.trades = []
-        self.strategy_func: Optional[Callable] = None
-        self.market_data: Dict[str, pd.DataFrame] = {}
-        self.backtest_id = f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        self.trades: List[Dict[str, Any]] = []
+        self.equity_curve: List[Dict] = []
 
-        # 数据库管理器
+        # 进度回调
+        self.progress_callback = None
+
+        # 数据库管理器（可选）
+        self.db_manager = None
         if config.save_to_db:
             self.db_manager = get_backtest_database_manager()
 
@@ -102,13 +124,23 @@ class BacktestEngine:
                     # 确保数据按时间排序
                     df = df.sort_index()
 
-                    # 过滤日期范围
-                    df = df[
-                        (df.index >= self.config.start_date)
-                        & (df.index <= self.config.end_date)
-                    ]
+                    # 过滤日期范围 - 只比较日期部分
+                    start_date = (
+                        self.config.start_date.date()
+                        if hasattr(self.config.start_date, "date")
+                        else self.config.start_date
+                    )
+                    end_date = (
+                        self.config.end_date.date()
+                        if hasattr(self.config.end_date, "date")
+                        else self.config.end_date
+                    )
+
+                    df = df[(df.index.date >= start_date) & (df.index.date <= end_date)]
                     self.market_data[symbol] = df
-                    logger.info(f"Loaded {len(df)} records for {symbol}")
+                    logger.info(
+                        f"Loaded {len(df)} records for {symbol} between {start_date} and {end_date}"
+                    )
                 else:
                     logger.warning(f"No data found for {symbol}")
 
@@ -124,6 +156,14 @@ class BacktestEngine:
         """
         self.strategy_func = strategy_func
         logger.info("Strategy function set")
+
+    def set_progress_callback(self, callback):
+        """设置进度回调函数
+
+        Args:
+            callback: 异步回调函数 async def callback(current: int, total: int, message: str)
+        """
+        self.progress_callback = callback
 
     def run(self) -> BacktestResult:
         """运行回测
@@ -144,9 +184,23 @@ class BacktestEngine:
 
             # 生成交易日期
             trading_dates = self._generate_trading_dates()
+            logger.info(f"🔍 Generated {len(trading_dates)} trading dates")
 
             # 逐日回测
-            for date in trading_dates:
+            for i, date in enumerate(trading_dates):
+                if i % 50 == 0:  # 每50天打印一次
+                    logger.info(
+                        f"🔍 Processing trading day {i + 1}/{len(trading_dates)}: {date}"
+                    )
+
+                    # 调用进度回调
+                    if self.progress_callback:
+                        self._call_progress_callback(
+                            i + 1,
+                            len(trading_dates),
+                            f"处理交易日 {date.strftime('%Y-%m-%d')}",
+                        )
+
                 self._process_trading_day(date)
 
             # 计算回测结果
@@ -155,6 +209,12 @@ class BacktestEngine:
             # 保存到数据库
             if self.config.save_to_db:
                 self._save_to_database(result)
+
+            # 最终进度回调
+            if self.progress_callback:
+                self._call_progress_callback(
+                    len(trading_dates), len(trading_dates), "回测完成"
+                )
 
             logger.info(
                 f"Backtest completed. Final capital: {result.final_capital:.2f}"
@@ -172,18 +232,32 @@ class BacktestEngine:
             交易日期列表
         """
         dates = []
-        current_date = self.config.start_date
+        # 统一转换为日期（去掉时间部分）
+        start_date = (
+            self.config.start_date.date()
+            if hasattr(self.config.start_date, "date")
+            else self.config.start_date
+        )
+        end_date = (
+            self.config.end_date.date()
+            if hasattr(self.config.end_date, "date")
+            else self.config.end_date
+        )
 
-        while current_date <= self.config.end_date:
+        current_date = start_date
+
+        while current_date <= end_date:
             # 检查是否有市场数据
             has_data = False
             for symbol, data in self.market_data.items():
-                if current_date in data.index:
+                # 比较日期部分
+                if any(idx.date() == current_date for idx in data.index):
                     has_data = True
                     break
 
             if has_data:
-                dates.append(current_date)
+                # 将日期转换回datetime以保持一致性
+                dates.append(datetime.combine(current_date, datetime.min.time()))
 
             current_date += timedelta(days=1)
 
@@ -196,11 +270,17 @@ class BacktestEngine:
             date: 交易日期
         """
         try:
-            # 获取当日市场数据
+            # 获取当日市场数据 - 只比较日期部分
             current_data = {}
+            target_date = date.date() if hasattr(date, "date") else date
+
             for symbol, data in self.market_data.items():
-                if date in data.index:
-                    current_data[symbol] = data.loc[date]
+                # 查找匹配的日期
+                matching_dates = [
+                    idx for idx in data.index if idx.date() == target_date
+                ]
+                if matching_dates:
+                    current_data[symbol] = data.loc[matching_dates[0]]
 
             if not current_data:
                 return
@@ -214,13 +294,105 @@ class BacktestEngine:
                 {"date": date, "equity": total_equity, "cash": self.current_capital}
             )
 
+            # 风险控制检查
+            if self.risk_controller:
+                # 计算当日损益
+                daily_pnl = None
+                if len(self.equity_curve) >= 2:
+                    daily_pnl = total_equity - self.equity_curve[-2]["equity"]
+
+                # 构建持仓信息
+                positions_info = {}
+                for symbol, pos in self.positions.items():
+                    if symbol in current_data:
+                        current_price = float(current_data[symbol]["close"])
+                    else:
+                        current_price = pos.avg_cost
+                    positions_info[symbol] = {
+                        "quantity": pos.quantity,
+                        "avg_cost": pos.avg_cost,
+                        "current_price": current_price,
+                    }
+
+                # 执行风险检查
+                risk_action = self.risk_controller.check_risk_limits(
+                    current_equity=total_equity,
+                    positions=positions_info,
+                    daily_pnl=daily_pnl,
+                    recent_trades=self.trades[-10:] if len(self.trades) > 0 else [],
+                )
+
+                # 处理风险动作
+                if risk_action.action == "CLOSE_ALL":
+                    logger.warning(f"⚠️ 触发CLOSE_ALL: {risk_action.message}")
+                    # 清空所有持仓
+                    from common.data_structures import Signal
+
+                    for symbol, pos in list(self.positions.items()):
+                        if symbol in current_data:
+                            close_price = float(current_data[symbol]["close"])
+                            sell_signal = Signal(
+                                signal_id=f"risk_close_all_{symbol}_{date}",
+                                symbol=symbol,
+                                action="SELL",
+                                price=close_price,
+                                quantity=pos.quantity,
+                                confidence=1.0,
+                                timestamp=date,
+                                strategy_name="风险控制",
+                                metadata={
+                                    "reason": "CLOSE_ALL",
+                                    "message": risk_action.message,
+                                },
+                            )
+                            self._execute_sell(sell_signal, close_price, date)
+                    return  # 停止交易
+
+                elif risk_action.action == "STOP_TRADING":
+                    logger.warning(f"⚠️ 触发STOP_TRADING: {risk_action.message}")
+                    return  # 不生成新信号
+
+                elif risk_action.action == "REDUCE_POSITION":
+                    logger.warning(f"⚠️ 触发REDUCE_POSITION: {risk_action.message}")
+                    # 减仓（这里可以选择部分平仓）
+                    from common.data_structures import Signal
+
+                    for symbol, pos in list(self.positions.items()):
+                        if symbol in current_data:
+                            close_price = float(current_data[symbol]["close"])
+                            reduce_qty = int(pos.quantity * 0.3)  # 减仓30%
+                            if reduce_qty > 0:
+                                sell_signal = Signal(
+                                    signal_id=f"risk_reduce_{symbol}_{date}",
+                                    symbol=symbol,
+                                    action="SELL",
+                                    price=close_price,
+                                    quantity=reduce_qty,
+                                    confidence=1.0,
+                                    timestamp=date,
+                                    strategy_name="风险控制",
+                                    metadata={
+                                        "reason": "REDUCE_POSITION",
+                                        "message": risk_action.message,
+                                    },
+                                )
+                                self._execute_sell(sell_signal, close_price, date)
+
             # 生成交易信号
             if self.strategy_func:
+                logger.debug(
+                    f"🔍 Calling strategy for {date} with {len(current_data)} symbols"
+                )
                 signals = self.strategy_func(
                     current_data, self.positions, self.current_capital
                 )
+                logger.debug(
+                    f"🔍 Strategy returned {len(signals) if signals else 0} signals"
+                )
                 if signals:
-                    self._execute_signals(signals, current_data)
+                    self._execute_signals(signals, current_data, date)
+            else:
+                logger.warning(f"⚠️ No strategy function set for {date}")
 
         except Exception as e:
             logger.error(f"Error processing trading day {date}: {e}")
@@ -253,13 +425,17 @@ class BacktestEngine:
         return total_equity
 
     def _execute_signals(
-        self, signals: List[Signal], current_data: Dict[str, pd.Series]
+        self,
+        signals: List[Signal],
+        current_data: Dict[str, pd.Series],
+        trading_date: datetime,
     ):
         """执行交易信号
 
         Args:
             signals: 交易信号列表
             current_data: 当前市场数据
+            trading_date: 交易日期
         """
         for signal in signals:
             try:
@@ -270,19 +446,22 @@ class BacktestEngine:
                 current_price = current_data[signal.symbol]["close"]
 
                 if signal.action == "BUY":
-                    self._execute_buy(signal, current_price)
+                    self._execute_buy(signal, current_price, trading_date)
                 elif signal.action == "SELL":
-                    self._execute_sell(signal, current_price)
+                    self._execute_sell(signal, current_price, trading_date)
 
             except Exception as e:
                 logger.error(f"Error executing signal {signal.signal_id}: {e}")
 
-    def _execute_buy(self, signal: Signal, current_price: float):
+    def _execute_buy(
+        self, signal: Signal, current_price: float, trading_date: datetime
+    ):
         """执行买入操作
 
         Args:
             signal: 买入信号
             current_price: 当前价格
+            trading_date: 交易日期
         """
         # 计算实际价格（考虑滑点）
         slippage = current_price * (self.config.slippage_bps / 10000)
@@ -312,7 +491,7 @@ class BacktestEngine:
         else:
             # 新建持仓
             self.positions[signal.symbol] = Position(
-                position_id=f"pos_{signal.symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                position_id=f"pos_{signal.symbol}_{trading_date.strftime('%Y%m%d_%H%M%S')}",
                 symbol=signal.symbol,
                 quantity=signal.quantity,
                 avg_cost=execution_price,
@@ -320,14 +499,14 @@ class BacktestEngine:
                 market_value=trade_value,
                 unrealized_pnl=0.0,
                 realized_pnl=0.0,
-                open_time=datetime.now(),
-                last_update=datetime.now(),
+                open_time=trading_date,
+                last_update=trading_date,
             )
 
         # 记录交易
         self.trades.append(
             {
-                "date": datetime.now(),
+                "date": trading_date,
                 "symbol": signal.symbol,
                 "action": "BUY",
                 "quantity": signal.quantity,
@@ -342,12 +521,15 @@ class BacktestEngine:
             f"Executed buy: {signal.quantity} {signal.symbol} at {execution_price:.2f}"
         )
 
-    def _execute_sell(self, signal: Signal, current_price: float):
+    def _execute_sell(
+        self, signal: Signal, current_price: float, trading_date: datetime
+    ):
         """执行卖出操作
 
         Args:
             signal: 卖出信号
             current_price: 当前价格
+            trading_date: 交易日期
         """
         if signal.symbol not in self.positions:
             logger.warning(f"No position for {signal.symbol}, skipping sell signal")
@@ -385,7 +567,7 @@ class BacktestEngine:
         # 记录交易
         self.trades.append(
             {
-                "date": datetime.now(),
+                "date": trading_date,
                 "symbol": signal.symbol,
                 "action": "SELL",
                 "quantity": sell_quantity,
@@ -472,6 +654,21 @@ class BacktestEngine:
                 total_profit / total_loss if total_loss > 0 else float("inf")
             )
 
+            # 计算盈亏比 (平均盈利/平均亏损)
+            winning_pnls = [
+                t.get("realized_pnl", 0)
+                for t in self.trades
+                if t.get("realized_pnl", 0) > 0
+            ]
+            losing_pnls = [
+                abs(t.get("realized_pnl", 0))
+                for t in self.trades
+                if t.get("realized_pnl", 0) < 0
+            ]
+            avg_win = sum(winning_pnls) / len(winning_pnls) if winning_pnls else 0
+            avg_loss = sum(losing_pnls) / len(losing_pnls) if losing_pnls else 0
+            win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 0
+
             # 性能指标
             performance_metrics = {
                 "total_return": total_return,
@@ -481,6 +678,7 @@ class BacktestEngine:
                 "max_drawdown": max_drawdown,
                 "win_rate": win_rate,
                 "profit_factor": profit_factor,
+                "win_loss_ratio": win_loss_ratio,
                 "total_trades": total_trades,
                 "final_capital": final_capital,
             }
@@ -497,6 +695,7 @@ class BacktestEngine:
                 max_drawdown=max_drawdown,
                 win_rate=win_rate,
                 profit_factor=profit_factor,
+                win_loss_ratio=win_loss_ratio,
                 total_trades=total_trades,
                 performance_metrics=performance_metrics,
                 equity_curve=equity_df,
@@ -506,6 +705,24 @@ class BacktestEngine:
         except Exception as e:
             logger.error(f"Failed to calculate results: {e}")
             raise QuantSystemError(f"Results calculation failed: {e}")
+
+    def _call_progress_callback(self, current: int, total: int, message: str):
+        """调用进度回调
+
+        Args:
+            current: 当前进度
+            total: 总进度
+            message: 进度消息
+        """
+        if not self.progress_callback:
+            return
+
+        try:
+            # 直接调用回调（包装器已在strategy_workflow中处理异步/同步）
+            self.progress_callback(current, total, message)
+        except Exception as e:
+            # 忽略进度回调错误，不影响回测主流程
+            logger.debug(f"Progress callback error: {e}")
 
     def _save_to_database(self, result: BacktestResult):
         """保存回测结果到数据库

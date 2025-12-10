@@ -20,12 +20,15 @@ logger = setup_logger("risk_database_manager")
 class RiskDatabaseManager:
     """风险管理数据库管理器"""
 
-    def __init__(self, db_path: str = "data/module05_risk_management.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module05_risk_management.db")
         self.db_path = db_path
         self._ensure_db_directory()
         self._initialize_database()

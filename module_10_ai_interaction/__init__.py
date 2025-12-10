@@ -3,6 +3,9 @@ AI交互模块初始化文件
 提供自然语言理解、对话管理、需求解析、策略推荐等功能
 """
 
+# AI服务（主备容错机制）
+from .aliyun_ai_service import AliyunAIService
+
 # FIN-R1集成
 # 对话历史
 from .conversation_history import (
@@ -21,7 +24,23 @@ from .dialogue_manager import (
     DialogueState,
     create_dialogue_manager,
 )
-from .fin_r1_integration import FINR1Integration, process_investment_request
+from .hybrid_ai_service import HybridAIService
+
+try:
+    from .fin_r1_integration import FINR1Integration, process_investment_request
+
+    _FIN_R1_IMPORT_ERROR = None
+except ImportError as exc:  # noqa: F401
+    _FIN_R1_IMPORT_ERROR = exc
+    FINR1Integration = None  # type: ignore[assignment]
+
+    def process_investment_request(*args, **kwargs):  # type: ignore[override]
+        """Fallback when FIN-R1 integration is unavailable."""
+
+        raise RuntimeError(
+            "FIN-R1 integration component is not available in the current environment"
+        ) from _FIN_R1_IMPORT_ERROR
+
 
 # 意图分类
 from .intent_classifier import (
@@ -75,6 +94,9 @@ from .response_generator import (
 )
 
 __all__ = [
+    # AI服务（主备容错）
+    "HybridAIService",
+    "AliyunAIService",
     # FIN-R1
     "FINR1Integration",
     "process_investment_request",

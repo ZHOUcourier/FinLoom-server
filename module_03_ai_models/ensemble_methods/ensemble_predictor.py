@@ -55,9 +55,14 @@ class EnsemblePredictor:
 
         # 初始化权重
         if self.config.weights is None:
-            self.config.weights = [1.0 / len(self.config.models)] * len(
-                self.config.models
-            )
+            # 只有在有模型时才初始化权重
+            if len(self.config.models) > 0:
+                self.config.weights = [1.0 / len(self.config.models)] * len(
+                    self.config.models
+                )
+            else:
+                # 如果模型列表为空，权重列表也为空
+                self.config.weights = []
 
     def add_model(self, name: str, model: Any, weight: float = 1.0):
         """添加模型
@@ -102,8 +107,18 @@ class EnsemblePredictor:
             # 训练每个模型
             for i, (name, model) in enumerate(self.models.items()):
                 try:
-                    if hasattr(model, "train"):
-                        # 如果模型支持训练
+                    # 检查模型是否已训练（通过is_trained属性）
+                    if hasattr(model, "is_trained") and model.is_trained:
+                        # 模型已训练，不重新训练，使用默认高性能分数
+                        logger.info(
+                            f"Model {name} already trained, skipping re-training"
+                        )
+                        individual_performances.append(0.8)
+
+                    elif hasattr(model, "train") and callable(
+                        getattr(model, "train", None)
+                    ):
+                        # 模型支持训练且未训练，执行训练
                         metrics = model.train(X, y)
                         training_metrics[f"{name}_train_loss"] = metrics.get(
                             "train_loss", 0.0
@@ -121,15 +136,21 @@ class EnsemblePredictor:
                             )
 
                         # 记录性能用于权重调整
-                        performance_score = 1.0 / (
-                            1.0
-                            + metrics.get("val_loss", metrics.get("train_loss", 1.0))
+                        # 确保分母不为零
+                        val_loss = metrics.get(
+                            "val_loss", metrics.get("train_loss", 0.0)
                         )
+                        # 如果loss为0，说明模型完美，给高分
+                        if val_loss == 0:
+                            performance_score = 1.0
+                        else:
+                            performance_score = 1.0 / (1.0 + val_loss)
                         individual_performances.append(performance_score)
 
                     else:
-                        logger.warning(f"Model {name} does not have train method")
-                        individual_performances.append(0.5)  # 默认性能
+                        # 模型不支持训练，使用默认分数
+                        logger.warning(f"Model {name} does not support training")
+                        individual_performances.append(0.5)
 
                 except Exception as e:
                     logger.error(f"Failed to train model {name}: {e}")
@@ -137,13 +158,45 @@ class EnsemblePredictor:
 
             # 根据性能调整权重
             if individual_performances and self.config.voting_strategy == "weighted":
-                total_performance = sum(individual_performances)
-                if total_performance > 0:
-                    self.config.weights = [
-                        perf / total_performance for perf in individual_performances
-                    ]
-                    logger.info(
-                        f"Adjusted weights based on performance: {self.config.weights}"
+                # 确保有有效的性能数据
+                valid_performances = [p for p in individual_performances if p > 0]
+
+                if valid_performances:
+                    # 使用有效的性能数据计算权重
+                    total_performance = sum(valid_performances)
+
+                    # 如果某些模型性能为0，给它们最小权重
+                    adjusted_performances = []
+                    for perf in individual_performances:
+                        if perf > 0:
+                            adjusted_performances.append(perf)
+                        else:
+                            # 给失败的模型一个很小的权重
+                            adjusted_performances.append(0.01)
+
+                    # 重新计算总和
+                    total_performance = sum(adjusted_performances)
+
+                    if total_performance > 0:
+                        self.config.weights = [
+                            perf / total_performance for perf in adjusted_performances
+                        ]
+                        logger.info(
+                            f"Adjusted weights based on performance: {self.config.weights}"
+                        )
+                    else:
+                        # 如果总性能仍为0，使用均等权重
+                        self.config.weights = [1.0 / len(self.models)] * len(
+                            self.models
+                        )
+                        logger.warning(
+                            f"Total performance is 0, using equal weights: {self.config.weights}"
+                        )
+                else:
+                    # 如果没有有效性能数据，使用均等权重
+                    self.config.weights = [1.0 / len(self.models)] * len(self.models)
+                    logger.warning(
+                        f"No valid performances, using equal weights: {self.config.weights}"
                     )
 
             # 计算集成指标
@@ -215,7 +268,11 @@ class EnsemblePredictor:
 
                     individual_predictions[name] = pred
                     predictions_list.append(pred)
-                    weights.append(self.config.weights[i])
+                    # 安全获取权重，如果索引越界使用默认权重
+                    if i < len(self.config.weights):
+                        weights.append(self.config.weights[i])
+                    else:
+                        weights.append(1.0 / len(self.models))
                 else:
                     logger.warning(f"Model {name} does not have predict method")
 
@@ -226,7 +283,13 @@ class EnsemblePredictor:
             if self.config.voting_strategy == "weighted":
                 # 加权平均
                 weights = np.array(weights)
-                weights = weights / weights.sum()  # 归一化权重
+                weights_sum = weights.sum()
+                # 防止除以零
+                if weights_sum > 0:
+                    weights = weights / weights_sum  # 归一化权重
+                else:
+                    # 如果权重和为0，使用均等权重
+                    weights = np.ones(len(weights)) / len(weights)
                 ensemble_pred = np.average(predictions_list, axis=0, weights=weights)
             elif self.config.voting_strategy == "average":
                 # 简单平均

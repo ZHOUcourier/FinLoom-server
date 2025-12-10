@@ -31,3 +31,12 @@ monitoring:
   enable: true
   metrics_port: 8001
   health_check_interval: 60
+
+# AI模型配置
+ai_model:
+  provider: aliyun  # 使用阿里云API
+  aliyun:
+    api_key: "sk-97c76c35db024c3094ac8efd814dada5"  # 阿里云API密钥
+    model: "qwen-plus"  # 可选: qwen-turbo, qwen-plus, qwen-max
+    temperature: 0.7
+    max_tokens: 2000

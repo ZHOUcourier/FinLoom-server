@@ -54,7 +54,7 @@ class ReportConfig:
     chart_theme: str = "plotly_white"
     language: str = "en"  # 'en' or 'zh'
     formats: List[str] = field(default_factory=lambda: ["html", "pdf", "excel"])
-    output_dir: str = "module_09_backtesting/reports"
+    output_dir: str = os.path.join("module_09_backtesting", "reports")
     timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
@@ -1462,7 +1462,7 @@ class BacktestReportGenerator:
 def generate_backtest_report(
     backtest_result: Any,
     output_formats: List[str] = ["html", "pdf", "excel"],
-    output_dir: str = "module_09_backtesting/reports",
+    output_dir: str = None,
 ) -> Dict[str, str]:
     """生成回测报告的便捷函数
 
@@ -1474,6 +1474,9 @@ def generate_backtest_report(
     Returns:
         生成的文件路径字典
     """
+    if output_dir is None:
+        output_dir = os.path.join("module_09_backtesting", "reports")
+    
     config = ReportConfig(
         title="Backtest Analysis Report", formats=output_formats, output_dir=output_dir
     )

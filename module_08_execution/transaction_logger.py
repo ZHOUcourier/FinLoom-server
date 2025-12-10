@@ -88,7 +88,9 @@ class TransactionLogger:
         self.config = config
 
         # 日志目录
-        self.log_dir = Path(config.get("log_dir", "logs/transactions"))
+        import os
+        default_log_dir = os.path.join("logs", "transactions")
+        self.log_dir = Path(config.get("log_dir", default_log_dir))
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # 日志格式

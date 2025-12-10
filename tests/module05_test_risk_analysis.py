@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Module 05 风险管理模块测试
 测试投资组合风险评估、仓位管理、止损策略等功能
@@ -9,6 +10,12 @@ conda activate study
 
 import os
 import sys
+
+# 设置 Windows 控制台 UTF-8 编码支持
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

@@ -35,13 +35,15 @@ class OptimizationManager:
     """
 
     def __init__(
-        self, workspace_dir: str = "module_07_optimization/optimization_workspace"
+        self, workspace_dir: str = None
     ):
         """初始化优化管理器
 
         Args:
             workspace_dir: 工作空间目录
         """
+        if workspace_dir is None:
+            workspace_dir = os.path.join("module_07_optimization", "optimization_workspace")
         self.workspace_dir = Path(workspace_dir)
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 

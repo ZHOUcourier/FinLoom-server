@@ -1,743 +1,350 @@
 #!/usr/bin/env python3
-"""
-完全智能化的AI策略系统
-用户只需输入投资需求，系统自动完成：
-1. 市场分析和状态判断
-2. 智能选股推荐
-3. 自动选择最优AI模型
-4. 策略自动生成和优化
-5. 回测和报告生成
-"""
+"""High-level CLI orchestrator for the FinLoom intelligent strategy workflow."""
+
+from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-import numpy as np
-import pandas as pd
 
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+def _ensure_repo_path() -> None:
+    """Ensure the repository root is on sys.path for module resolution."""
 
-from common.data_structures import Signal
-from common.logging_system import setup_logger
+    module_path = Path(__file__).resolve()
+    candidates = {module_path.parent, module_path.parent.parent}
+    for candidate in candidates:
+        candidate_str = str(candidate)
+        if candidate_str not in sys.path:
+            sys.path.insert(0, candidate_str)
 
-# ========== 完整的模块导入 ==========
-# Module 01: 数据
-from module_01_data_pipeline import AkshareDataCollector, get_database_manager
 
-# Module 02: 特征工程
-from module_02_feature_engineering import TechnicalIndicators
+_ensure_repo_path()
 
-# Module 03: AI模型（多种模型）
-from module_03_ai_models import (
-    EnsembleConfig,
-    EnsemblePredictor,
-    LSTMModel,
-    LSTMModelConfig,
-    OnlineLearner,
-    OnlineLearningConfig,
-    PPOAgent,
-    PPOConfig,
-    TradingEnvironment,
-    TransformerConfig,
-    TransformerPredictor,
-    get_ai_model_database_manager,
+from ai_strategy_system.core.strategy_workflow import (  # noqa: E402
+    StrategyWorkflow,
+    StrategyWorkflowResult,
 )
+from common.logging_system import setup_logger  # noqa: E402
 
-# Module 04: 市场分析（AI分析市场）
-from module_04_market_analysis.regime_detection.market_regime_detector import (
-    MarketRegimeDetector,
-    RegimeDetectionConfig,
-)
-from module_04_market_analysis.sentiment_analysis.fin_r1_sentiment import (
-    TradingAgentsSentimentAnalyzer,
-)
+LOGGER = setup_logger("intelligent_strategy_ai")
 
-# Module 05: 风险管理
-from module_05_risk_management.portfolio_optimization.mean_variance_optimizer import (
-    MeanVarianceOptimizer,
-)
-
-# Module 09: 回测
-from module_09_backtesting import (
-    BacktestConfig,
-    BacktestEngine,
-    BacktestReportGenerator,
-    PerformanceAnalyzer,
-    ReportConfig,
-)
-
-# Module 10: AI交互和推荐
-from module_10_ai_interaction import (
-    RecommendationEngine,
-    RequirementParser,
-)
-
-logger = setup_logger("intelligent_strategy_ai")
+ProgressCallback = Callable[[int, str, str], Optional[Awaitable[None]]]
 
 
 class IntelligentStrategyAI:
-    """完全智能化的AI策略系统"""
+    """Command-style wrapper that executes the full intelligent workflow."""
 
     def __init__(
-        self, user_requirement: str = None, initial_capital: float = 1000000.0
-    ):
-        """
-        初始化智能策略系统
-
-        Args:
-            user_requirement: 用户需求（自然语言），如"我想要稳健成长的策略"
-            initial_capital: 初始资金
-        """
+        self,
+        user_requirement: Optional[str] = None,
+        initial_capital: float = 1_000_000.0,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> None:
         self.user_requirement = user_requirement or "中等风险，追求稳健收益"
         self.initial_capital = initial_capital
+        self.workflow = StrategyWorkflow()
+        self._progress_callback = progress_callback
 
-        # AI组件
-        self.requirement_parser = None
-        self.recommendation_engine = None
-        self.market_regime_detector = None
-        self.sentiment_analyzer = None
+        self.requirement_context = None
+        self.market_context = None
+        self.universe = None
+        self.feature_bundle = None
+        self.model_choice = None
+        self.trained_model = None
+        self.strategy_params = None
+        self.portfolio_plan = None
+        self.execution_plan = None
+        self.backtest_summary = None
+        self.workflow_result: Optional[StrategyWorkflowResult] = None
 
-        # 数据容器
-        self.parsed_requirement = None
-        self.market_analysis = {}
-        self.recommended_stocks = []
-        self.selected_model = None
-        self.strategy_config = {}
+        self.recommended_stocks: List[str] = []
+        self.selected_model_type: Optional[str] = None
+        self.selected_model_config: Dict[str, Any] = {}
+        self.selected_model_reason: Optional[str] = None
+        self.backtest_id: Optional[str] = None
 
-        logger.info("=" * 60)
-        logger.info("🤖 智能策略AI系统初始化")
-        logger.info("=" * 60)
-        logger.info(f"用户需求: {self.user_requirement}")
-        logger.info(f"初始资金: ¥{self.initial_capital:,.0f}")
+        LOGGER.info("=" * 60)
+        LOGGER.info("🤖 智能策略AI系统初始化")
+        LOGGER.info("=" * 60)
+        LOGGER.info(f"用户需求: {self.user_requirement}")
+        LOGGER.info(f"初始资金: ¥{self.initial_capital:,.0f}")
 
-    async def step1_understand_requirement(self):
-        """步骤1: AI理解用户需求 (Module 10)"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤1: AI理解用户需求 (Module 10 - NLP)")
-        logger.info("=" * 60)
-
+    async def _notify_progress(
+        self, step_index: int, step_name: str, status: str
+    ) -> None:
+        if not self._progress_callback:
+            return
         try:
-            # 使用Module 10的需求解析器
-            self.requirement_parser = RequirementParser()
+            result = self._progress_callback(step_index, step_name, status)
+            if inspect.isawaitable(result):
+                await result  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("Progress callback failed for step %s: %s", step_name, exc)
 
-            # 解析用户自然语言需求
-            logger.info(f"正在解析需求: '{self.user_requirement}'")
-            self.parsed_requirement = self.requirement_parser.parse_requirement(
+    async def step1_understand_requirement(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤1: AI理解用户需求 (Module 10 - NLP)")
+        LOGGER.info("=" * 60)
+        try:
+            self.requirement_context = await self.workflow.requirement_service.process(
                 self.user_requirement
             )
+            parsed = self.requirement_context.parsed_requirement
+            system_params = self.requirement_context.system_params
 
-            logger.info("\n✓ 需求解析结果:")
-            logger.info(
-                f"  投资金额: ¥{self.parsed_requirement.investment_amount:,.0f}"
-            )
-            logger.info(f"  风险偏好: {self.parsed_requirement.risk_tolerance}")
-            logger.info(f"  投资期限: {self.parsed_requirement.investment_horizon}")
-            logger.info(f"  投资目标: {self.parsed_requirement.goals}")
+            investment_amount = getattr(parsed, "investment_amount", None)
+            if investment_amount:
+                LOGGER.info(f"✓ 投资金额: ¥{investment_amount:,.0f}")
+            risk_tolerance = getattr(parsed, "risk_tolerance", None)
+            if risk_tolerance:
+                LOGGER.info(f"✓ 风险偏好: {risk_tolerance}")
+            horizon = getattr(parsed, "investment_horizon", None)
+            if horizon:
+                LOGGER.info(f"✓ 投资期限: {horizon}")
+            goals = getattr(parsed, "goals", None)
+            if goals:
+                LOGGER.info(f"✓ 投资目标: {', '.join(goal.value for goal in goals)}")
 
-            # 映射到系统参数
-            self.strategy_config = self.requirement_parser.map_to_system_parameters(
-                self.parsed_requirement
-            )
-            logger.info(f"\n✓ 系统参数映射完成")
+            if system_params:
+                LOGGER.info(f"✓ 系统参数映射完成: {', '.join(system_params.keys())}")
 
-            return True
-
-        except Exception as e:
-            logger.error(f"✗ 需求解析失败: {e}")
-            # 使用默认配置
-            self.strategy_config = {
-                "risk_params": {"max_position_size": 0.3, "stop_loss": 0.05},
-                "strategy_params": {"holding_period": "medium"},
-            }
-            logger.info("使用默认配置")
-            return True
-
-    async def step2_analyze_market(self):
-        """步骤2: AI分析市场状态 (Module 04)"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤2: AI分析市场状态 (Module 04 - 多维分析)")
-        logger.info("=" * 60)
-
-        try:
-            collector = AkshareDataCollector(rate_limit=0.5)
-
-            # 2.1 市场状态检测
-            logger.info("\n[2.1] 检测市场状态...")
-            self.market_regime_detector = MarketRegimeDetector(
-                RegimeDetectionConfig(n_regimes=3, use_hmm=True, use_clustering=True)
-            )
-
-            # 获取主要市场指数数据
-            index_symbol = "000300"  # 沪深300
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=252)).strftime("%Y%m%d")
-
-            market_data = collector.fetch_stock_history(
-                index_symbol, start_date, end_date
-            )
-
-            if not market_data.empty:
-                regime_state = self.market_regime_detector.detect_market_regime(
-                    market_data
-                )
-                self.market_analysis["regime"] = {
-                    "state": regime_state.regime.value,
-                    "confidence": regime_state.confidence,
-                    "characteristics": regime_state.characteristics,
-                }
-                logger.info(f"✓ 市场状态: {regime_state.regime.value}")
-                logger.info(f"  置信度: {regime_state.confidence:.2%}")
-            else:
-                logger.warning("⚠ 无法获取市场数据，使用默认状态")
-                self.market_analysis["regime"] = {"state": "neutral", "confidence": 0.5}
-
-            # 2.2 情感分析
-            logger.info("\n[2.2] 分析市场情感...")
-            self.sentiment_analyzer = TradingAgentsSentimentAnalyzer()
-
-            try:
-                # 分析整体市场情感
-                market_sentiment = (
-                    await self.sentiment_analyzer.analyze_market_sentiment()
-                )
-                self.market_analysis["sentiment"] = {
-                    "score": market_sentiment.get("overall_sentiment", 0),
-                    "confidence": market_sentiment.get("confidence", 0.5),
-                }
-                logger.info(
-                    f"✓ 市场情感: {market_sentiment.get('overall_sentiment', 0):.2f}"
-                )
-            except Exception as e:
-                logger.warning(f"⚠ 情感分析失败: {e}，使用中性情感")
-                self.market_analysis["sentiment"] = {"score": 0, "confidence": 0.5}
-
-            # 2.3 生成市场总结
-            market_state = self.market_analysis["regime"]["state"]
-            sentiment_score = self.market_analysis["sentiment"]["score"]
-
-            logger.info("\n✓ 市场分析完成:")
-            logger.info(f"  市场状态: {market_state}")
-            logger.info(f"  市场情感: {sentiment_score:.2f}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"✗ 市场分析失败: {e}")
-            import traceback
-
-            traceback.print_exc()
-            # 使用默认分析结果
-            self.market_analysis = {
-                "regime": {"state": "neutral", "confidence": 0.5},
-                "sentiment": {"score": 0, "confidence": 0.5},
-            }
-            return True
-
-    async def step3_ai_select_stocks(self):
-        """步骤3: AI智能选股 (Module 10 推荐引擎)"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤3: AI智能选股 (Module 10 - 推荐引擎)")
-        logger.info("=" * 60)
-
-        try:
-            self.recommendation_engine = RecommendationEngine()
-
-            # 根据解析的需求和市场状态生成股票推荐
-            user_profile = {
-                "risk_tolerance": (
-                    str(self.parsed_requirement.risk_tolerance)
-                    if self.parsed_requirement
-                    else "moderate"
-                ),
-                "investment_horizon": (
-                    str(self.parsed_requirement.investment_horizon)
-                    if self.parsed_requirement
-                    else "medium_term"
-                ),
-                "goals": ["wealth_growth"],
-            }
-
-            market_conditions = {
-                "trend": self.market_analysis["regime"]["state"],
-                "volatility": "medium",
-                "sentiment": self.market_analysis["sentiment"]["score"],
-            }
-
-            logger.info("正在生成投资组合推荐...")
-
-            # 获取推荐组合
-            portfolio_recommendations = (
-                self.recommendation_engine.generate_portfolio_recommendations(
-                    user_profile=user_profile,
-                    market_conditions=market_conditions,
-                    num_recommendations=3,
-                )
-            )
-
-            if portfolio_recommendations:
-                best_portfolio = portfolio_recommendations[0]
-                logger.info(f"\n✓ 推荐组合: {best_portfolio.name}")
-                logger.info(f"  适合度评分: {best_portfolio.suitability_score:.2f}")
-                logger.info(
-                    f"  预期收益: {best_portfolio.expected_metrics.get('expected_return', 0):.2%}"
+            if self.requirement_context.portfolio_recommendations:
+                best = self.requirement_context.portfolio_recommendations[0]
+                LOGGER.info(
+                    f"推荐组合: {best.name} (适配度 {best.suitability_score:.2f})"
                 )
 
-                # 从推荐的资产配置中提取股票
-                # 这里简化处理，实际应该根据asset_allocation动态选择
-                self.recommended_stocks = self._map_allocation_to_stocks(
-                    best_portfolio.asset_allocation
-                )
-            else:
-                # 如果推荐失败，使用默认股票池
-                logger.warning("⚠ 推荐失败，使用默认股票池")
-                self.recommended_stocks = self._get_default_stock_pool()
-
-            logger.info(f"\n✓ 选定股票池 ({len(self.recommended_stocks)}只):")
-            for symbol in self.recommended_stocks:
-                logger.info(f"  - {symbol}")
-
+            explanation = self.requirement_context.explanation
+            if explanation:
+                LOGGER.info(f"AI解释:\n{explanation}")
             return True
-
-        except Exception as e:
-            logger.error(f"✗ AI选股失败: {e}")
-            import traceback
-
-            traceback.print_exc()
-            self.recommended_stocks = self._get_default_stock_pool()
-            logger.info(f"使用默认股票池: {self.recommended_stocks}")
-            return True
-
-    def _map_allocation_to_stocks(self, allocation: Dict[str, float]) -> List[str]:
-        """将资产配置映射到具体股票"""
-        stocks = []
-
-        # 根据配置映射到具体板块和股票
-        stock_mapping = {
-            "stocks": ["600036", "000858", "600519"],  # 大盘蓝筹
-            "dividend_stocks": ["601318", "600028"],  # 高股息
-            "growth_stocks": ["000001", "002594"],  # 成长股
-            "tech": ["000063", "002475"],  # 科技股
-        }
-
-        for asset_type, weight in allocation.items():
-            if weight > 0 and asset_type in stock_mapping:
-                # 按权重选择股票数量
-                num_stocks = max(1, int(weight * 10))
-                stocks.extend(stock_mapping[asset_type][:num_stocks])
-
-        # 去重并限制数量
-        stocks = list(set(stocks))[:8]  # 最多8只股票
-
-        # 如果为空，返回默认
-        return stocks if stocks else self._get_default_stock_pool()
-
-    def _get_default_stock_pool(self) -> List[str]:
-        """获取默认股票池"""
-        return ["000001", "600036", "000858", "600519", "601318"]
-
-    async def step4_ai_select_model(self):
-        """步骤4: AI自动选择最优模型 (Module 03)"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤4: AI自动选择最优模型 (Module 03)")
-        logger.info("=" * 60)
-
-        try:
-            market_state = self.market_analysis["regime"]["state"]
-            sentiment = self.market_analysis["sentiment"]["score"]
-
-            # 根据市场状态和风险偏好智能选择模型
-            logger.info(f"根据市场状态 [{market_state}] 选择最优AI模型...")
-
-            model_selection = self._intelligent_model_selection(market_state, sentiment)
-
-            self.selected_model_type = model_selection["type"]
-            self.selected_model_config = model_selection["config"]
-            self.selected_model_reason = model_selection["reason"]
-
-            logger.info(f"\n✓ 选择模型: {self.selected_model_type}")
-            logger.info(f"  原因: {self.selected_model_reason}")
-            logger.info(f"  配置: {self.selected_model_config}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"✗ 模型选择失败: {e}")
-            # 默认使用LSTM
-            self.selected_model_type = "lstm"
-            self.selected_model_config = {"sequence_length": 10, "hidden_size": 32}
-            return True
-
-    def _intelligent_model_selection(
-        self, market_state: str, sentiment: float
-    ) -> Dict[str, Any]:
-        """智能模型选择算法"""
-
-        # 根据市场状态选择模型
-        if market_state == "bull":
-            # 牛市：使用动量策略，LSTM效果好
-            return {
-                "type": "lstm",
-                "config": {
-                    "sequence_length": 10,
-                    "hidden_size": 64,
-                    "num_layers": 2,
-                    "epochs": 15,
-                },
-                "reason": "牛市行情，LSTM捕捉趋势效果好",
-            }
-        elif market_state == "bear":
-            # 熊市：使用防御策略，在线学习快速适应
-            return {
-                "type": "online",
-                "config": {"learning_rate": 0.01, "buffer_size": 500},
-                "reason": "熊市震荡，在线学习快速适应市场变化",
-            }
-        elif abs(sentiment) > 0.5:
-            # 情绪极端：使用强化学习
-            return {
-                "type": "ppo",
-                "config": {"learning_rate": 0.0003, "hidden_dims": [64, 64]},
-                "reason": "市场情绪极端，强化学习应对复杂环境",
-            }
-        else:
-            # 震荡市：使用集成模型
-            return {
-                "type": "ensemble",
-                "config": {"models": ["lstm", "transformer"], "voting": "weighted"},
-                "reason": "震荡市场，集成模型提高稳定性",
-            }
-
-    async def step5_train_selected_model(self):
-        """步骤5: 训练选定的AI模型"""
-        logger.info("\n" + "=" * 60)
-        logger.info(f"步骤5: 训练{self.selected_model_type.upper()}模型")
-        logger.info("=" * 60)
-
-        try:
-            # 获取数据
-            collector = AkshareDataCollector(rate_limit=0.5)
-            calculator = TechnicalIndicators()
-
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-
-            all_features = []
-
-            for symbol in self.recommended_stocks:
-                try:
-                    data = collector.fetch_stock_history(symbol, start_date, end_date)
-                    if data is not None and not data.empty:
-                        features = calculator.calculate_all_indicators(data)
-                        features["returns"] = features["close"].pct_change()
-                        features["future_returns"] = features["returns"].shift(-1)
-                        features["symbol"] = symbol
-                        features = features.dropna()
-                        all_features.append(features)
-                        logger.info(f"✓ {symbol}: {len(features)} 条记录")
-                except Exception as e:
-                    logger.warning(f"⚠ {symbol} 数据获取失败: {e}")
-
-            if not all_features:
-                logger.error("无可用数据")
-                return False
-
-            combined_features = pd.concat(all_features, ignore_index=True)
-            train_size = int(0.8 * len(combined_features))
-            train_data = combined_features[:train_size]
-
-            logger.info(f"\n训练数据: {len(train_data)} 条")
-
-            # 根据选择的模型类型训练
-            if self.selected_model_type == "lstm":
-                self.trained_model = await self._train_lstm_model(train_data)
-            elif self.selected_model_type == "online":
-                self.trained_model = await self._train_online_model(train_data)
-            elif self.selected_model_type == "ppo":
-                self.trained_model = await self._train_ppo_model(train_data)
-            elif self.selected_model_type == "ensemble":
-                self.trained_model = await self._train_ensemble_model(train_data)
-            else:
-                # 默认LSTM
-                self.trained_model = await self._train_lstm_model(train_data)
-
-            logger.info("✓ 模型训练完成")
-            return True
-
-        except Exception as e:
-            logger.error(f"✗ 模型训练失败: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"✗ 需求解析失败: {exc}")
             return False
 
-    async def _train_lstm_model(self, train_data: pd.DataFrame):
-        """训练LSTM模型"""
-        config = LSTMModelConfig(
-            sequence_length=self.selected_model_config.get("sequence_length", 10),
-            hidden_size=self.selected_model_config.get("hidden_size", 32),
-            num_layers=self.selected_model_config.get("num_layers", 1),
-            epochs=self.selected_model_config.get("epochs", 10),
-            batch_size=16,
-            learning_rate=0.001,
-        )
+    async def step2_analyze_market(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤2: AI分析市场状态 (Module 04 - 多维分析)")
+        LOGGER.info("=" * 60)
+        try:
+            self.market_context = await self.workflow.market_service.analyse()
+            regime_state = self.market_context.regime.get("state")
+            regime_conf = self.market_context.regime.get("confidence")
+            sentiment_score = self.market_context.sentiment.get("score")
+            sentiment_conf = self.market_context.sentiment.get("confidence")
 
-        model = LSTMModel(config)
-        X, y = model.prepare_data(
-            train_data.drop(columns=["symbol"], errors="ignore"), "future_returns"
-        )
-        model.train(X, y)
-        return model
+            LOGGER.info(f"✓ 市场状态: {regime_state} (置信度 {regime_conf or 0.0:.2f})")
+            LOGGER.info(
+                f"✓ 市场情感: {sentiment_score or 0.0:.2f} (置信度 {sentiment_conf or 0.0:.2f})"
+            )
+            LOGGER.info(f"数据来源: {self.market_context.data_sources}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"✗ 市场分析失败: {exc}")
+            return False
 
-    async def _train_online_model(self, train_data: pd.DataFrame):
-        """训练在线学习模型"""
-        config = OnlineLearningConfig(
-            learning_rate=self.selected_model_config.get("learning_rate", 0.01),
-            buffer_size=self.selected_model_config.get("buffer_size", 500),
-        )
+    async def step3_ai_select_stocks(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤3: AI智能选股 (Module 10 - 推荐引擎)")
+        LOGGER.info("=" * 60)
+        try:
+            if not self.requirement_context or not self.market_context:
+                raise RuntimeError("前置步骤未完成")
 
-        model = OnlineLearner(config)
+            self.universe = await self.workflow.universe_service.build_universe(
+                self.requirement_context,
+                self.market_context,
+            )
+            self.recommended_stocks = list(self.universe.symbols)
+            LOGGER.info(
+                f"✓ 入选股票池 ({len(self.recommended_stocks)}只): {', '.join(self.recommended_stocks)}"
+            )
+            LOGGER.info(f"选股依据: {self.universe.rationale}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"✗ AI选股失败: {exc}")
+            return False
 
-        # 逐步添加样本
-        features = train_data.drop(
-            columns=["symbol", "future_returns"], errors="ignore"
-        ).values
-        targets = train_data["future_returns"].values
+    async def step4_ai_select_model(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤4: AI自动选择最优模型 (Module 03)")
+        LOGGER.info("=" * 60)
+        try:
+            if not self.market_context:
+                raise RuntimeError("市场上下文不可用")
+            self.model_choice = self.workflow.model_service.select_model(
+                self.market_context
+            )
+            self.selected_model_type = self.model_choice.model_type
+            self.selected_model_config = self.model_choice.config
+            self.selected_model_reason = self.model_choice.reason
+            LOGGER.info(f"✓ 选择模型: {self.selected_model_type.upper()}")
+            LOGGER.info(f"  原因: {self.selected_model_reason}")
+            LOGGER.info(f"  配置: {self.selected_model_config}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"✗ 模型选择失败: {exc}")
+            return False
 
-        for feat, target in zip(features[:1000], targets[:1000]):
-            model.add_sample(feat, target)
+    async def step5_train_selected_model(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤5: 准备特征并训练模型")
+        LOGGER.info("=" * 60)
+        try:
+            if not self.universe or not self.model_choice:
+                raise RuntimeError("缺少模型或股票池信息")
 
-        return model
+            LOGGER.info("  >>> 开始特征准备...")
+            self.feature_bundle = await self.workflow.feature_service.prepare(
+                self.universe
+            )
+            LOGGER.info(
+                f"✓ 特征数据量: {len(self.feature_bundle.combined_features)} 条"
+            )
 
-    async def _train_ppo_model(self, train_data: pd.DataFrame):
-        """训练PPO强化学习模型"""
-        # 创建交易环境
-        env_data = train_data.copy()
+            LOGGER.info("  >>> 开始模型训练...")
+            self.trained_model = await self.workflow.model_service.train_model(
+                self.model_choice,
+                self.feature_bundle,
+            )
+            LOGGER.info("✓ 模型训练完成")
+            LOGGER.info(f"  训练摘要: {self.trained_model.training_metadata}")
+            return True
+        except ZeroDivisionError as zde:
+            LOGGER.error(f"✗ 模型训练失败（除零错误）: {zde}", exc_info=True)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"✗ 模型训练失败: {exc}", exc_info=True)
+            return False
 
-        config = PPOConfig(
-            state_dim=10,
-            action_dim=3,
-            learning_rate=self.selected_model_config.get("learning_rate", 0.0003),
-        )
+    async def step6_generate_strategy(self) -> bool:
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤6: 生成交易策略与执行计划")
+        LOGGER.info("=" * 60)
+        try:
+            if (
+                not self.market_context
+                or not self.feature_bundle
+                or not self.trained_model
+            ):
+                raise RuntimeError("策略生成缺乏必要上下文")
 
-        model = PPOAgent(config)
+            self.strategy_params = self.workflow.strategy_service.build_parameters(
+                self.market_context
+            )
+            LOGGER.info(
+                "✓ 策略参数: buy_threshold=%.3f, confidence_threshold=%.2f, max_position=%.2f",
+                self.strategy_params.buy_threshold,
+                self.strategy_params.confidence_threshold,
+                self.strategy_params.max_position,
+            )
 
-        # 简化训练（实际需要更复杂的环境）
-        logger.info("PPO模型创建完成（简化版本）")
-        return model
+            self.portfolio_plan = self.workflow.portfolio_service.construct_portfolio(
+                self.feature_bundle,
+                self.strategy_params,
+                self.initial_capital,
+            )
+            LOGGER.info(f"✓ 组合权重: {self.portfolio_plan.weights}")
+            LOGGER.info(f"  风险指标: {self.portfolio_plan.risk_metrics}")
 
-    async def _train_ensemble_model(self, train_data: pd.DataFrame):
-        """训练集成模型"""
-        logger.info("训练集成模型...")
+            self.execution_plan = self.workflow.execution_service.build_plan(
+                self.portfolio_plan,
+                self.feature_bundle,
+                self.strategy_params,
+                self.initial_capital,
+            )
+            LOGGER.info(
+                "✓ 执行计划(%d单): %s",
+                len(self.execution_plan.orders),
+                self.execution_plan.algorithm,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("✗ 策略生成失败: {}", exc)
+            return False
 
-        # 创建LSTM
-        lstm_model = await self._train_lstm_model(train_data)
+    async def step7_run_backtest(self) -> bool:
+        """步骤7: 运行智能回测 (Module 09)
 
-        # 创建简单的集成
-        config = EnsembleConfig(
-            models=[{"name": "lstm", "model": lstm_model, "weight": 1.0}],
-            voting_strategy="weighted",
-        )
+        注意：这个方法现在主要用于向后兼容，新的流程应该使用 run_backtest() 方法
+        """
+        LOGGER.info("\n" + "=" * 60)
+        LOGGER.info("步骤7: 运行智能回测 (Module 09)")
+        LOGGER.info("=" * 60)
+        return await self.run_backtest()
 
-        ensemble = EnsemblePredictor(config)
-        return ensemble
+    async def run_backtest(self, progress_callback=None) -> bool:
+        """独立执行回测（在策略生成完成后）
 
-    async def step6_generate_strategy(self):
-        """步骤6: 自动生成交易策略"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤6: 自动生成交易策略")
-        logger.info("=" * 60)
+        Args:
+            progress_callback: 进度回调函数 async def callback(current: int, total: int, message: str)
 
-        # 根据市场状态和模型类型生成策略参数
-        market_state = self.market_analysis["regime"]["state"]
-
-        if market_state == "bull":
-            self.strategy_params = {
-                "buy_threshold": 0.001,
-                "confidence_threshold": 0.5,
-                "max_position": 0.4,
-            }
-            logger.info("✓ 生成策略: 牛市激进策略")
-        elif market_state == "bear":
-            self.strategy_params = {
-                "buy_threshold": 0.003,
-                "confidence_threshold": 0.7,
-                "max_position": 0.2,
-            }
-            logger.info("✓ 生成策略: 熊市防御策略")
-        else:
-            self.strategy_params = {
-                "buy_threshold": 0.002,
-                "confidence_threshold": 0.6,
-                "max_position": 0.3,
-            }
-            logger.info("✓ 生成策略: 平衡策略")
-
-        logger.info(f"  买入阈值: {self.strategy_params['buy_threshold']:.3%}")
-        logger.info(f"  置信度要求: {self.strategy_params['confidence_threshold']:.1%}")
-        logger.info(f"  最大仓位: {self.strategy_params['max_position']:.1%}")
-
-        return True
-
-    async def step7_run_backtest(self):
-        """步骤7: 运行智能回测"""
-        logger.info("\n" + "=" * 60)
-        logger.info("步骤7: 运行智能回测 (Module 09)")
-        logger.info("=" * 60)
+        Returns:
+            bool: 回测是否成功
+        """
+        if not self.feature_bundle or not self.trained_model:
+            LOGGER.error("缺少必要的数据或模型，无法执行回测")
+            return False
 
         try:
-            # 准备市场数据
-            collector = AkshareDataCollector(rate_limit=0.5)
-            calculator = TechnicalIndicators()
+            # 尝试从需求上下文中获取回测日期
+            start_date = None
+            end_date = None
+            if self.requirement_context and hasattr(
+                self.requirement_context, "system_params"
+            ):
+                sys_params = self.requirement_context.system_params
+                start_date = sys_params.get("backtest_start_date") or sys_params.get(
+                    "start_date"
+                )
+                end_date = sys_params.get("backtest_end_date") or sys_params.get(
+                    "end_date"
+                )
+                if start_date and end_date:
+                    LOGGER.info(
+                        f"📅 使用需求中的回测日期: {start_date.date() if hasattr(start_date, 'date') else start_date} 至 {end_date.date() if hasattr(end_date, 'date') else end_date}"
+                    )
 
-            market_data = {}
-            features_data = {}
-
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-
-            for symbol in self.recommended_stocks:
-                try:
-                    data = collector.fetch_stock_history(symbol, start_date, end_date)
-                    if data is not None and not data.empty:
-                        market_data[symbol] = data
-                        features = calculator.calculate_all_indicators(data)
-                        features["symbol"] = symbol
-                        features_data[symbol] = features
-                except:
-                    continue
-
-            if not market_data:
-                logger.error("无市场数据")
-                return False
-
-            # 创建AI策略函数
-            def ai_strategy(current_data, positions, capital):
-                signals = []
-                try:
-                    for symbol, data in current_data.items():
-                        if symbol in positions:
-                            continue
-
-                        features = features_data.get(symbol)
-                        if features is None or len(features) < 10:
-                            continue
-
-                        recent = features.tail(10).drop(
-                            columns=["symbol"], errors="ignore"
-                        )
-                        if recent.empty:
-                            continue
-
-                        # AI预测
-                        try:
-                            prediction = self.trained_model.predict(recent.values[-5:])
-                            pred_return = (
-                                prediction.predictions[0]
-                                if hasattr(prediction, "predictions")
-                                else prediction
-                            )
-                            confidence = getattr(prediction, "confidence", 0.7)
-                        except:
-                            continue
-
-                        # 使用动态阈值
-                        if (
-                            pred_return > self.strategy_params["buy_threshold"]
-                            and confidence
-                            > self.strategy_params["confidence_threshold"]
-                        ):
-                            price = data["close"]
-                            position_value = (
-                                capital
-                                * self.strategy_params["max_position"]
-                                * confidence
-                            )
-                            quantity = int(position_value / price / 100) * 100
-
-                            if quantity >= 100:
-                                signal = Signal(
-                                    signal_id=f"ai_{symbol}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                                    symbol=symbol,
-                                    signal_type="BUY",
-                                    price=price,
-                                    quantity=quantity,
-                                    confidence=confidence,
-                                    timestamp=datetime.now(),
-                                    strategy_name="智能AI策略",
-                                    metadata={"predicted_return": float(pred_return)},
-                                )
-                                signals.append(signal)
-                                break
-                except:
-                    pass
-                return signals
-
-            # 配置回测
-            config = BacktestConfig(
-                start_date=datetime.strptime(start_date, "%Y%m%d"),
-                end_date=datetime.strptime(end_date, "%Y%m%d"),
+            self.backtest_summary = await self.workflow.backtest_service.run_backtest(
+                feature_bundle=self.feature_bundle,
+                execution_plan=self.execution_plan,
+                trained_model=self.trained_model,
+                strategy_params=self.strategy_params,
                 initial_capital=self.initial_capital,
-                commission_rate=0.0003,
-                slippage_bps=5.0,
-                save_to_db=True,
-                strategy_name=f"智能AI策略-{self.selected_model_type.upper()}",
+                start_date=start_date,
+                end_date=end_date,
+                progress_callback=progress_callback,
             )
-
-            # 运行回测
-            engine = BacktestEngine(config)
-            engine.load_market_data(list(market_data.keys()), market_data)
-            engine.set_strategy(ai_strategy)
-
-            logger.info("开始回测...")
-            result = engine.run()
-
-            # 显示结果
-            logger.info("\n" + "=" * 60)
-            logger.info("✓ 回测完成!")
-            logger.info("=" * 60)
-            logger.info(f"总收益率:    {result.total_return:>12.2%}")
-            logger.info(f"年化收益率:  {result.annualized_return:>12.2%}")
-            logger.info(f"夏普比率:    {result.sharpe_ratio:>12.3f}")
-            logger.info(f"最大回撤:    {result.max_drawdown:>12.2%}")
-            logger.info(f"交易次数:    {result.total_trades:>12}")
-            logger.info(f"胜率:        {result.win_rate:>12.2%}")
-
-            self.backtest_result = result
-            self.backtest_id = engine.backtest_id
-
-            # 生成报告
-            report_config = ReportConfig(
-                title=f"智能AI策略回测报告 - {self.selected_model_type.upper()}",
-                formats=["html", "excel"],
-                output_dir="reports",
-            )
-
-            report_gen = BacktestReportGenerator(report_config)
-            report_files = report_gen.generate_report(backtest_result=result)
-
-            logger.info("\n报告已生成:")
-            for fmt, path in report_files.items():
-                logger.info(f"  {fmt.upper()}: {path}")
-
+            result = self.backtest_summary.result
+            self.backtest_id = self.backtest_summary.backtest_id
+            LOGGER.info("✓ 回测完成")
+            LOGGER.info(f"  总收益率: {result.total_return * 100:.2f}%")
+            LOGGER.info(f"  年化收益率: {result.annualized_return * 100:.2f}%")
+            LOGGER.info(f"  夏普比率: {result.sharpe_ratio:.3f}")
+            LOGGER.info(f"  最大回撤: {result.max_drawdown * 100:.2f}%")
+            LOGGER.info(f"  交易次数: {result.total_trades}")
+            LOGGER.info(f"  胜率: {result.win_rate * 100:.2f}%")
+            LOGGER.info(f"报告文件: {self.backtest_summary.report_files}")
             return True
-
-        except Exception as e:
-            logger.error(f"✗ 回测失败: {e}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("✗ 回测失败: {}", exc, exc_info=True)
             return False
 
-    async def run_intelligent_workflow(self):
-        """运行完整的智能工作流"""
-        logger.info("\n")
-        logger.info("🤖 " + "=" * 56 + " 🤖")
-        logger.info("🤖  完全智能化AI策略系统  🤖")
-        logger.info("🤖 " + "=" * 56 + " 🤖")
+    async def run_intelligent_workflow(self, skip_backtest: bool = True) -> bool:
+        """运行智能策略工作流
+
+        Args:
+            skip_backtest: 是否跳过回测步骤（默认True，前端需要单独点击回测按钮）
+
+        Returns:
+            是否成功
+        """
+        LOGGER.info("\n🤖 " + "=" * 56 + " 🤖")
+        LOGGER.info("🤖  完全智能化AI策略系统  🤖")
+        LOGGER.info("🤖 " + "=" * 56 + " 🤖")
 
         steps = [
             ("AI理解用户需求", self.step1_understand_requirement),
@@ -746,47 +353,85 @@ class IntelligentStrategyAI:
             ("AI选择最优模型", self.step4_ai_select_model),
             ("训练AI模型", self.step5_train_selected_model),
             ("生成交易策略", self.step6_generate_strategy),
-            ("运行智能回测", self.step7_run_backtest),
         ]
 
-        for i, (name, func) in enumerate(steps, 1):
+        # 只有在不跳过回测时才添加回测步骤
+        if not skip_backtest:
+            steps.append(("运行智能回测", self.step7_run_backtest))
+
+        for idx, (name, func) in enumerate(steps, 1):
             try:
+                await self._notify_progress(idx, name, "running")
                 success = await func()
                 if not success:
-                    logger.error(f"\n❌ 步骤{i}失败: {name}")
+                    LOGGER.error("\n❌ 步骤{}失败: {}", idx, name)
+                    await self._notify_progress(idx, name, "failed")
                     return False
-            except Exception as e:
-                logger.error(f"\n❌ 步骤{i}异常: {name} - {e}")
-                import traceback
-
-                traceback.print_exc()
+                await self._notify_progress(idx, name, "completed")
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("\n❌ 步骤{}异常: {} - {}", idx, name, exc)
+                await self._notify_progress(idx, name, "failed")
                 return False
 
-        logger.info("\n" + "=" * 60)
-        logger.info("✅ 智能AI策略完整流程执行成功!")
-        logger.info("=" * 60)
-        logger.info(f"\n回测ID: {self.backtest_id}")
-        logger.info(f"选用模型: {self.selected_model_type.upper()}")
-        logger.info(f"股票数量: {len(self.recommended_stocks)}")
-        logger.info(f"最终收益率: {self.backtest_result.total_return:.2%}")
+        self.workflow_result = StrategyWorkflowResult(
+            requirement=self.requirement_context,
+            market=self.market_context,
+            universe=self.universe,
+            features=self.feature_bundle,
+            model=self.trained_model,
+            strategy_params=self.strategy_params,
+            portfolio=self.portfolio_plan,
+            execution=self.execution_plan,
+            backtest=self.backtest_summary,
+        )
+
+        LOGGER.info("\n" + "=" * 60)
+        if skip_backtest:
+            LOGGER.info("✅ 智能AI策略生成成功! (未执行回测)")
+            LOGGER.info("=" * 60)
+            LOGGER.info('💡 提示: 请在前端点击"回测"按钮执行回测')
+        else:
+            LOGGER.info("✅ 智能AI策略完整流程执行成功!")
+            LOGGER.info("=" * 60)
+
+        if self.backtest_id:
+            LOGGER.info(f"回测ID: {self.backtest_id}")
+        if self.selected_model_type:
+            LOGGER.info(f"选用模型: {self.selected_model_type.upper()}")
+        LOGGER.info(f"股票数量: {len(self.recommended_stocks)}")
+
+        if self.backtest_summary and hasattr(self.backtest_summary, "result"):
+            LOGGER.info(
+                f"最终收益率: {self.backtest_summary.result.total_return * 100:.2f}%"
+            )
+            # 新增：显示策略保存信息
+            if (
+                hasattr(self.backtest_summary, "strategy_id")
+                and self.backtest_summary.strategy_id
+            ):
+                LOGGER.info(f"📁 策略已保存，ID: {self.backtest_summary.strategy_id}")
+                LOGGER.info(
+                    f"📁 策略路径: ai_strategy_system/generated_strategies/{self.backtest_summary.strategy_id}/"
+                )
+                LOGGER.info(
+                    "💡 查看策略: python ai_strategy_system/strategy_persistence.py load %s",
+                    self.backtest_summary.strategy_id,
+                )
 
         return True
 
 
-async def main():
-    """主函数"""
-
+async def main() -> None:
     print("\n" + "=" * 70)
     print("🤖  FinLoom 智能AI策略系统  🤖")
     print("=" * 70)
 
-    # 从命令行获取需求
     if len(sys.argv) > 1:
         user_input = " ".join(sys.argv[1:])
-        print(f"\n📝 用户需求: {user_input}")
+        print("\n📝 用户需求: %s" % user_input)
     else:
         user_input = "我想要一个中等风险的策略，追求稳健收益，投资期限1-2年"
-        print(f"\n📝 默认需求: {user_input}")
+        print("\n📝 默认需求: %s" % user_input)
         print('💡 可自定义: python intelligent_strategy_ai.py "您的需求"\n')
 
     print("\n系统将自动完成:")
@@ -801,34 +446,33 @@ async def main():
 
     try:
         ai_system = IntelligentStrategyAI(
-            user_requirement=user_input, initial_capital=1000000.0
+            user_requirement=user_input, initial_capital=1_000_000.0
         )
-
         success = await ai_system.run_intelligent_workflow()
 
-        if success:
+        if success and ai_system.backtest_summary:
             print("\n" + "=" * 70)
             print("✅ 所有任务完成!")
             print("=" * 70)
-            print(f"\n📊 结果:")
-            print(f"  回测ID: {ai_system.backtest_id}")
-            print(f"  选用模型: {ai_system.selected_model_type.upper()}")
-            print(f"  股票数量: {len(ai_system.recommended_stocks)}")
-            print(f"  收益率: {ai_system.backtest_result.total_return:.2%}")
-            print(f"  夏普比率: {ai_system.backtest_result.sharpe_ratio:.3f}")
-            print(f"  最大回撤: {ai_system.backtest_result.max_drawdown:.2%}")
-            print("\n📁 报告: reports/ 目录")
+            print("\n📊 结果:")
+            if ai_system.backtest_id:
+                print("  回测ID: %s" % ai_system.backtest_id)
+            if ai_system.selected_model_type:
+                print("  选用模型: %s" % ai_system.selected_model_type.upper())
+            print("  股票数量: %d" % len(ai_system.recommended_stocks))
+            result = ai_system.backtest_summary.result
+            print("  收益率: %.2f%%" % (result.total_return * 100))
+            print("  夏普比率: %.3f" % result.sharpe_ratio)
+            print("  最大回撤: %.2f%%" % (result.max_drawdown * 100))
+            print("\n📁 报告目录: reports/")
             print("=" * 70)
         else:
             print("\n❌ 执行失败，查看日志")
-
     except KeyboardInterrupt:
         print("\n\n⚠️  用户中断")
-    except Exception as e:
-        print(f"\n\n❌ 错误: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception as exc:  # noqa: BLE001
+        print("\n\n❌ 错误: %s" % exc)
+        raise
 
 
 if __name__ == "__main__":

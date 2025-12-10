@@ -126,7 +126,7 @@ class TestBacktesting:
                         signal = Signal(
                             signal_id=f"sig_{symbol}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
                             symbol=symbol,
-                            signal_type="BUY",
+                            action="BUY",
                             price=price,
                             quantity=quantity,
                             confidence=0.7,

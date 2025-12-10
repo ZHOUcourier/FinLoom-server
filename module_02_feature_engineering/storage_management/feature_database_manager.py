@@ -21,12 +21,15 @@ logger = setup_logger("feature_database_manager")
 class FeatureDatabaseManager:
     """特征数据库管理器类"""
 
-    def __init__(self, db_path: str = "data/module02_features.db"):
+    def __init__(self, db_path: str = None):
         """初始化特征数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module02_features.db")
         self.db_path = db_path
         self._ensure_database_exists()
         self._init_tables()

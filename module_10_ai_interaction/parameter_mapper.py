@@ -191,6 +191,14 @@ class ParameterMapper:
         if parsed_requirement.investment_amount:
             system_params["investment_amount"] = parsed_requirement.investment_amount
 
+        # 应用回测日期
+        if parsed_requirement.backtest_start_date:
+            system_params["backtest_start_date"] = (
+                parsed_requirement.backtest_start_date
+            )
+        if parsed_requirement.backtest_end_date:
+            system_params["backtest_end_date"] = parsed_requirement.backtest_end_date
+
         logger.info("Mapped user requirements to system parameters")
 
         return system_params
@@ -453,8 +461,8 @@ class ParameterMapper:
     def _map_to_backtest_params(self, system_params: Dict[str, Any]) -> Dict[str, Any]:
         """映射到回测参数"""
         return {
-            "start_date": None,  # 由调用方指定
-            "end_date": None,  # 由调用方指定
+            "start_date": system_params.get("backtest_start_date"),  # 从用户需求提取
+            "end_date": system_params.get("backtest_end_date"),  # 从用户需求提取
             "initial_capital": system_params.get("investment_amount", 1000000),
             "benchmark": "000300",  # 沪深300
             "commission": 0.0003,

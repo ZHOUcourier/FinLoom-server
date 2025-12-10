@@ -17,12 +17,15 @@ logger = setup_logger("module10_database")
 class Module10DatabaseManager:
     """Module 10 数据库管理器"""
 
-    def __init__(self, db_path: str = "data/module10_ai_interaction.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module10_ai_interaction.db")
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_database()
@@ -168,6 +171,27 @@ class Module10DatabaseManager:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_feedback_session_id ON user_feedback(session_id)"
+        )
+
+        # 收藏对话表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS favorite_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                title TEXT,
+                summary TEXT,
+                tags TEXT,
+                rating INTEGER DEFAULT 0,
+                favorited_at DATETIME NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fav_user_session ON favorite_conversations(user_id, session_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_fav_user_id ON favorite_conversations(user_id)"
         )
 
         conn.commit()
@@ -819,6 +843,243 @@ class Module10DatabaseManager:
         conn.close()
 
         return stats
+
+    # ========== 收藏对话相关 ==========
+
+    def add_favorite_conversation(
+        self,
+        user_id: str,
+        session_id: str,
+        title: str = None,
+        summary: str = None,
+        tags: List[str] = None,
+        rating: int = 0,
+    ) -> int:
+        """添加收藏对话
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+            title: 收藏标题
+            summary: 对话摘要
+            tags: 标签列表
+            rating: 评分(0-5)
+
+        Returns:
+            收藏记录ID
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        tags_json = json.dumps(tags) if tags else None
+        favorited_at = datetime.now().isoformat()
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO favorite_conversations 
+                (user_id, session_id, title, summary, tags, rating, favorited_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (user_id, session_id, title, summary, tags_json, rating, favorited_at),
+            )
+            favorite_id = cursor.lastrowid
+            conn.commit()
+
+            logger.info(f"Added favorite conversation: {session_id} for user {user_id}")
+            return favorite_id
+
+        except sqlite3.IntegrityError:
+            logger.warning(f"Conversation {session_id} already favorited by user {user_id}")
+            # 如果已存在,更新信息
+            cursor.execute(
+                """
+                UPDATE favorite_conversations 
+                SET title = ?, summary = ?, tags = ?, rating = ?, favorited_at = ?
+                WHERE user_id = ? AND session_id = ?
+            """,
+                (title, summary, tags_json, rating, favorited_at, user_id, session_id),
+            )
+            conn.commit()
+            cursor.execute(
+                "SELECT id FROM favorite_conversations WHERE user_id = ? AND session_id = ?",
+                (user_id, session_id),
+            )
+            favorite_id = cursor.fetchone()[0]
+            return favorite_id
+
+        finally:
+            conn.close()
+
+    def remove_favorite_conversation(self, user_id: str, session_id: str) -> bool:
+        """移除收藏对话
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+
+        Returns:
+            是否成功移除
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            DELETE FROM favorite_conversations 
+            WHERE user_id = ? AND session_id = ?
+        """,
+            (user_id, session_id),
+        )
+
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+
+        if deleted:
+            logger.info(f"Removed favorite conversation: {session_id} for user {user_id}")
+
+        return deleted
+
+    def get_favorite_conversations(
+        self, user_id: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """获取用户收藏的对话列表
+
+        Args:
+            user_id: 用户ID
+            limit: 返回数量限制
+
+        Returns:
+            收藏对话列表
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT id, session_id, title, summary, tags, rating, favorited_at, created_at
+            FROM favorite_conversations
+            WHERE user_id = ?
+            ORDER BY favorited_at DESC
+            LIMIT ?
+        """,
+            (user_id, limit),
+        )
+
+        favorites = []
+        for row in cursor.fetchall():
+            favorites.append(
+                {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "title": row[2],
+                    "summary": row[3],
+                    "tags": json.loads(row[4]) if row[4] else [],
+                    "rating": row[5],
+                    "favorited_at": row[6],
+                    "created_at": row[7],
+                }
+            )
+
+        conn.close()
+
+        return favorites
+
+    def is_conversation_favorited(self, user_id: str, session_id: str) -> bool:
+        """检查对话是否已收藏
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+
+        Returns:
+            是否已收藏
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM favorite_conversations 
+            WHERE user_id = ? AND session_id = ?
+        """,
+            (user_id, session_id),
+        )
+
+        is_favorited = cursor.fetchone()[0] > 0
+        conn.close()
+
+        return is_favorited
+
+    def update_favorite_conversation(
+        self,
+        user_id: str,
+        session_id: str,
+        title: str = None,
+        summary: str = None,
+        tags: List[str] = None,
+        rating: int = None,
+    ) -> bool:
+        """更新收藏对话信息
+
+        Args:
+            user_id: 用户ID
+            session_id: 会话ID
+            title: 新标题
+            summary: 新摘要
+            tags: 新标签列表
+            rating: 新评分
+
+        Returns:
+            是否更新成功
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # 构建更新语句
+        updates = []
+        params = []
+
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+
+        if summary is not None:
+            updates.append("summary = ?")
+            params.append(summary)
+
+        if tags is not None:
+            updates.append("tags = ?")
+            params.append(json.dumps(tags))
+
+        if rating is not None:
+            updates.append("rating = ?")
+            params.append(rating)
+
+        if not updates:
+            conn.close()
+            return False
+
+        params.extend([user_id, session_id])
+
+        cursor.execute(
+            f"""
+            UPDATE favorite_conversations 
+            SET {', '.join(updates)}
+            WHERE user_id = ? AND session_id = ?
+        """,
+            params,
+        )
+
+        updated = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+
+        if updated:
+            logger.info(f"Updated favorite conversation: {session_id} for user {user_id}")
+
+        return updated
 
 
 # 模块级别函数

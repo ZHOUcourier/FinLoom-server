@@ -22,12 +22,16 @@ logger = setup_logger("backtest_database")
 class BacktestDatabaseManager:
     """回测数据库管理器"""
 
-    def __init__(self, db_path: str = "data/module09_backtest.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+
+            db_path = os.path.join("data", "module09_backtest.db")
         self.db_path = db_path
 
         # 确保目录存在
@@ -40,7 +44,7 @@ class BacktestDatabaseManager:
 
     def _initialize_database(self):
         """初始化数据库表结构"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
 
         # 创建回测结果主表
@@ -191,47 +195,48 @@ class BacktestDatabaseManager:
             是否保存成功
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            # 准备数据
-            metadata_json = json.dumps(metadata or {})
+                # 准备数据
+                metadata_json = json.dumps(metadata or {})
 
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO backtest_results (
-                    backtest_id, strategy_name, start_date, end_date,
-                    initial_capital, final_capital, total_return,
-                    annualized_return, volatility, sharpe_ratio,
-                    sortino_ratio, calmar_ratio, max_drawdown,
-                    max_drawdown_duration, win_rate, profit_factor,
-                    total_trades, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    backtest_id,
-                    metadata.get("strategy_name", "Unknown") if metadata else "Unknown",
-                    result.start_date.strftime("%Y-%m-%d"),
-                    result.end_date.strftime("%Y-%m-%d"),
-                    result.initial_capital,
-                    result.final_capital,
-                    result.total_return,
-                    result.annualized_return,
-                    result.volatility,
-                    result.sharpe_ratio,
-                    getattr(result, "sortino_ratio", None),
-                    getattr(result, "calmar_ratio", None),
-                    result.max_drawdown,
-                    getattr(result, "max_drawdown_duration", None),
-                    result.win_rate,
-                    result.profit_factor,
-                    result.total_trades,
-                    metadata_json,
-                ),
-            )
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO backtest_results (
+                        backtest_id, strategy_name, start_date, end_date,
+                        initial_capital, final_capital, total_return,
+                        annualized_return, volatility, sharpe_ratio,
+                        sortino_ratio, calmar_ratio, max_drawdown,
+                        max_drawdown_duration, win_rate, profit_factor,
+                        total_trades, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        backtest_id,
+                        metadata.get("strategy_name", "Unknown")
+                        if metadata
+                        else "Unknown",
+                        result.start_date.strftime("%Y-%m-%d"),
+                        result.end_date.strftime("%Y-%m-%d"),
+                        result.initial_capital,
+                        result.final_capital,
+                        result.total_return,
+                        result.annualized_return,
+                        result.volatility,
+                        result.sharpe_ratio,
+                        getattr(result, "sortino_ratio", None),
+                        getattr(result, "calmar_ratio", None),
+                        result.max_drawdown,
+                        getattr(result, "max_drawdown_duration", None),
+                        result.win_rate,
+                        result.profit_factor,
+                        result.total_trades,
+                        metadata_json,
+                    ),
+                )
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
             logger.info(f"Saved backtest result: {backtest_id}")
             return True
@@ -251,55 +256,54 @@ class BacktestDatabaseManager:
             是否保存成功
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            for trade in trades:
-                metadata = {
-                    k: v
-                    for k, v in trade.items()
-                    if k
-                    not in [
-                        "symbol",
-                        "action",
-                        "quantity",
-                        "price",
-                        "value",
-                        "commission",
-                        "realized_pnl",
-                        "date",
-                        "signal_id",
-                    ]
-                }
+                for trade in trades:
+                    metadata = {
+                        k: v
+                        for k, v in trade.items()
+                        if k
+                        not in [
+                            "symbol",
+                            "action",
+                            "quantity",
+                            "price",
+                            "value",
+                            "commission",
+                            "realized_pnl",
+                            "date",
+                            "signal_id",
+                        ]
+                    }
 
-                cursor.execute(
-                    """
-                    INSERT INTO trades (
-                        backtest_id, symbol, side, quantity, price,
-                        value, commission, slippage, realized_pnl,
-                        trade_date, signal_id, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        backtest_id,
-                        trade.get("symbol"),
-                        trade.get("action", trade.get("side")),
-                        trade.get("quantity"),
-                        trade.get("price"),
-                        trade.get("value"),
-                        trade.get("commission", 0),
-                        trade.get("slippage", 0),
-                        trade.get("realized_pnl", 0),
-                        trade.get("date", datetime.now()).strftime("%Y-%m-%d")
-                        if isinstance(trade.get("date"), datetime)
-                        else str(trade.get("date")),
-                        trade.get("signal_id"),
-                        json.dumps(metadata),
-                    ),
-                )
+                    cursor.execute(
+                        """
+                        INSERT INTO trades (
+                            backtest_id, symbol, side, quantity, price,
+                            value, commission, slippage, realized_pnl,
+                            trade_date, signal_id, metadata
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            backtest_id,
+                            trade.get("symbol"),
+                            trade.get("action", trade.get("side")),
+                            trade.get("quantity"),
+                            trade.get("price"),
+                            trade.get("value"),
+                            trade.get("commission", 0),
+                            trade.get("slippage", 0),
+                            trade.get("realized_pnl", 0),
+                            trade.get("date", datetime.now()).strftime("%Y-%m-%d")
+                            if isinstance(trade.get("date"), datetime)
+                            else str(trade.get("date")),
+                            trade.get("signal_id"),
+                            json.dumps(metadata),
+                        ),
+                    )
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
             logger.info(f"Saved {len(trades)} trades for backtest {backtest_id}")
             return True
@@ -319,51 +323,52 @@ class BacktestDatabaseManager:
             是否保存成功
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            # 计算每日收益率和回撤
-            equity_series = (
-                equity_curve["equity"]
-                if "equity" in equity_curve.columns
-                else equity_curve.iloc[:, 0]
-            )
-            daily_returns = equity_series.pct_change()
-            cumulative_returns = (1 + daily_returns).cumprod() - 1
-
-            running_max = equity_series.expanding().max()
-            drawdown = (equity_series - running_max) / running_max
-
-            for idx, row in equity_curve.iterrows():
-                date_str = (
-                    idx.strftime("%Y-%m-%d")
-                    if isinstance(idx, pd.Timestamp)
-                    else str(idx)
+                # 计算每日收益率和回撤
+                equity_series = (
+                    equity_curve["equity"]
+                    if "equity" in equity_curve.columns
+                    else equity_curve.iloc[:, 0]
                 )
+                daily_returns = equity_series.pct_change()
+                cumulative_returns = (1 + daily_returns).cumprod() - 1
 
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO equity_curve (
-                        backtest_id, date, equity, cash, positions_value,
-                        daily_return, cumulative_return, drawdown
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        backtest_id,
-                        date_str,
-                        row.get("equity", equity_series.loc[idx]),
-                        row.get("cash", 0),
-                        row.get("positions_value", 0),
-                        daily_returns.loc[idx] if idx in daily_returns.index else None,
-                        cumulative_returns.loc[idx]
-                        if idx in cumulative_returns.index
-                        else None,
-                        drawdown.loc[idx] if idx in drawdown.index else None,
-                    ),
-                )
+                running_max = equity_series.expanding().max()
+                drawdown = (equity_series - running_max) / running_max
 
-            conn.commit()
-            conn.close()
+                for idx, row in equity_curve.iterrows():
+                    date_str = (
+                        idx.strftime("%Y-%m-%d")
+                        if isinstance(idx, pd.Timestamp)
+                        else str(idx)
+                    )
+
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO equity_curve (
+                            backtest_id, date, equity, cash, positions_value,
+                            daily_return, cumulative_return, drawdown
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            backtest_id,
+                            date_str,
+                            row.get("equity", equity_series.loc[idx]),
+                            row.get("cash", 0),
+                            row.get("positions_value", 0),
+                            daily_returns.loc[idx]
+                            if idx in daily_returns.index
+                            else None,
+                            cumulative_returns.loc[idx]
+                            if idx in cumulative_returns.index
+                            else None,
+                            drawdown.loc[idx] if idx in drawdown.index else None,
+                        ),
+                    )
+
+                conn.commit()
 
             logger.info(f"Saved equity curve for backtest {backtest_id}")
             return True
@@ -386,21 +391,20 @@ class BacktestDatabaseManager:
             是否保存成功
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            for metric_name, metric_value in metrics.items():
-                cursor.execute(
-                    """
-                    INSERT INTO performance_metrics (
-                        backtest_id, metric_name, metric_value, metric_category
-                    ) VALUES (?, ?, ?, ?)
-                """,
-                    (backtest_id, metric_name, float(metric_value), category),
-                )
+                for metric_name, metric_value in metrics.items():
+                    cursor.execute(
+                        """
+                        INSERT INTO performance_metrics (
+                            backtest_id, metric_name, metric_value, metric_category
+                        ) VALUES (?, ?, ?, ?)
+                    """,
+                        (backtest_id, metric_name, float(metric_value), category),
+                    )
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
             logger.info(
                 f"Saved {len(metrics)} performance metrics for backtest {backtest_id}"
@@ -421,23 +425,22 @@ class BacktestDatabaseManager:
             回测结果字典
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT * FROM backtest_results WHERE backtest_id = ?", (backtest_id,)
-            )
-            row = cursor.fetchone()
+                cursor.execute(
+                    "SELECT * FROM backtest_results WHERE backtest_id = ?",
+                    (backtest_id,),
+                )
+                row = cursor.fetchone()
 
-            if row:
-                result = dict(row)
-                result["metadata"] = json.loads(result.get("metadata", "{}"))
-                conn.close()
-                return result
+                if row:
+                    result = dict(row)
+                    result["metadata"] = json.loads(result.get("metadata", "{}"))
+                    return result
 
-            conn.close()
-            return None
+                return None
 
         except Exception as e:
             logger.error(f"Failed to get backtest result: {e}")
@@ -453,11 +456,10 @@ class BacktestDatabaseManager:
             交易记录DataFrame
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            query = "SELECT * FROM trades WHERE backtest_id = ? ORDER BY trade_date"
-            df = pd.read_sql_query(query, conn, params=(backtest_id,))
-            conn.close()
-            return df
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                query = "SELECT * FROM trades WHERE backtest_id = ? ORDER BY trade_date"
+                df = pd.read_sql_query(query, conn, params=(backtest_id,))
+                return df
 
         except Exception as e:
             logger.error(f"Failed to get trades: {e}")
@@ -473,14 +475,13 @@ class BacktestDatabaseManager:
             权益曲线DataFrame
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            query = "SELECT * FROM equity_curve WHERE backtest_id = ? ORDER BY date"
-            df = pd.read_sql_query(query, conn, params=(backtest_id,))
-            if not df.empty:
-                df["date"] = pd.to_datetime(df["date"])
-                df.set_index("date", inplace=True)
-            conn.close()
-            return df
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                query = "SELECT * FROM equity_curve WHERE backtest_id = ? ORDER BY date"
+                df = pd.read_sql_query(query, conn, params=(backtest_id,))
+                if not df.empty:
+                    df["date"] = pd.to_datetime(df["date"])
+                    df.set_index("date", inplace=True)
+                return df
 
         except Exception as e:
             logger.error(f"Failed to get equity curve: {e}")
@@ -499,31 +500,30 @@ class BacktestDatabaseManager:
             指标字典
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            if category:
-                cursor.execute(
-                    """
-                    SELECT metric_name, metric_value 
-                    FROM performance_metrics 
-                    WHERE backtest_id = ? AND metric_category = ?
-                """,
-                    (backtest_id, category),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT metric_name, metric_value 
-                    FROM performance_metrics 
-                    WHERE backtest_id = ?
-                """,
-                    (backtest_id,),
-                )
+                if category:
+                    cursor.execute(
+                        """
+                        SELECT metric_name, metric_value 
+                        FROM performance_metrics 
+                        WHERE backtest_id = ? AND metric_category = ?
+                    """,
+                        (backtest_id, category),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT metric_name, metric_value 
+                        FROM performance_metrics 
+                        WHERE backtest_id = ?
+                    """,
+                        (backtest_id,),
+                    )
 
-            metrics = {row[0]: row[1] for row in cursor.fetchall()}
-            conn.close()
-            return metrics
+                metrics = {row[0]: row[1] for row in cursor.fetchall()}
+                return metrics
 
         except Exception as e:
             logger.error(f"Failed to get performance metrics: {e}")
@@ -539,18 +539,17 @@ class BacktestDatabaseManager:
             回测列表DataFrame
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            query = """
-                SELECT backtest_id, strategy_name, start_date, end_date,
-                       total_return, sharpe_ratio, max_drawdown, total_trades,
-                       created_at
-                FROM backtest_results
-                ORDER BY created_at DESC
-                LIMIT ?
-            """
-            df = pd.read_sql_query(query, conn, params=(limit,))
-            conn.close()
-            return df
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                query = """
+                    SELECT backtest_id, strategy_name, start_date, end_date,
+                           total_return, sharpe_ratio, max_drawdown, total_trades,
+                           created_at
+                    FROM backtest_results
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """
+                df = pd.read_sql_query(query, conn, params=(limit,))
+                return df
 
         except Exception as e:
             logger.error(f"Failed to list backtests: {e}")
@@ -566,29 +565,31 @@ class BacktestDatabaseManager:
             是否删除成功
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            # 删除相关表数据
-            cursor.execute("DELETE FROM trades WHERE backtest_id = ?", (backtest_id,))
-            cursor.execute(
-                "DELETE FROM equity_curve WHERE backtest_id = ?", (backtest_id,)
-            )
-            cursor.execute(
-                "DELETE FROM performance_metrics WHERE backtest_id = ?", (backtest_id,)
-            )
-            cursor.execute(
-                "DELETE FROM positions WHERE backtest_id = ?", (backtest_id,)
-            )
-            cursor.execute(
-                "DELETE FROM risk_metrics WHERE backtest_id = ?", (backtest_id,)
-            )
-            cursor.execute(
-                "DELETE FROM backtest_results WHERE backtest_id = ?", (backtest_id,)
-            )
+                # 删除相关表数据
+                cursor.execute(
+                    "DELETE FROM trades WHERE backtest_id = ?", (backtest_id,)
+                )
+                cursor.execute(
+                    "DELETE FROM equity_curve WHERE backtest_id = ?", (backtest_id,)
+                )
+                cursor.execute(
+                    "DELETE FROM performance_metrics WHERE backtest_id = ?",
+                    (backtest_id,),
+                )
+                cursor.execute(
+                    "DELETE FROM positions WHERE backtest_id = ?", (backtest_id,)
+                )
+                cursor.execute(
+                    "DELETE FROM risk_metrics WHERE backtest_id = ?", (backtest_id,)
+                )
+                cursor.execute(
+                    "DELETE FROM backtest_results WHERE backtest_id = ?", (backtest_id,)
+                )
 
-            conn.commit()
-            conn.close()
+                conn.commit()
 
             logger.info(f"Deleted backtest: {backtest_id}")
             return True
@@ -604,42 +605,41 @@ class BacktestDatabaseManager:
             统计信息字典
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
 
-            stats = {}
+                stats = {}
 
-            # 回测数量
-            cursor.execute("SELECT COUNT(*) FROM backtest_results")
-            stats["total_backtests"] = cursor.fetchone()[0]
+                # 回测数量
+                cursor.execute("SELECT COUNT(*) FROM backtest_results")
+                stats["total_backtests"] = cursor.fetchone()[0]
 
-            # 交易数量
-            cursor.execute("SELECT COUNT(*) FROM trades")
-            stats["total_trades"] = cursor.fetchone()[0]
+                # 交易数量
+                cursor.execute("SELECT COUNT(*) FROM trades")
+                stats["total_trades"] = cursor.fetchone()[0]
 
-            # 平均夏普比率
-            cursor.execute(
-                "SELECT AVG(sharpe_ratio) FROM backtest_results WHERE sharpe_ratio IS NOT NULL"
-            )
-            result = cursor.fetchone()
-            stats["avg_sharpe_ratio"] = result[0] if result[0] else 0
+                # 平均夏普比率
+                cursor.execute(
+                    "SELECT AVG(sharpe_ratio) FROM backtest_results WHERE sharpe_ratio IS NOT NULL"
+                )
+                result = cursor.fetchone()
+                stats["avg_sharpe_ratio"] = result[0] if result[0] else 0
 
-            # 平均最大回撤
-            cursor.execute(
-                "SELECT AVG(max_drawdown) FROM backtest_results WHERE max_drawdown IS NOT NULL"
-            )
-            result = cursor.fetchone()
-            stats["avg_max_drawdown"] = result[0] if result[0] else 0
+                # 平均最大回撤
+                cursor.execute(
+                    "SELECT AVG(max_drawdown) FROM backtest_results WHERE max_drawdown IS NOT NULL"
+                )
+                result = cursor.fetchone()
+                stats["avg_max_drawdown"] = result[0] if result[0] else 0
 
-            # 数据库大小
-            cursor.execute(
-                "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()"
-            )
-            result = cursor.fetchone()
-            stats["database_size_mb"] = result[0] / (1024 * 1024) if result else 0
+                # 数据库大小
+                cursor.execute(
+                    "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()"
+                )
+                result = cursor.fetchone()
+                stats["database_size_mb"] = result[0] / (1024 * 1024) if result else 0
 
-            conn.close()
-            return stats
+                return stats
 
         except Exception as e:
             logger.error(f"Failed to get statistics: {e}")

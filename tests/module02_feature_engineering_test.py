@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Module 02 特征工程模块测试
 测试技术指标计算、因子分析、时间序列特征、图特征分析等功能
@@ -7,6 +8,12 @@ Module 02 特征工程模块测试
 import os
 import sys
 from datetime import datetime, timedelta
+
+# 设置 Windows 控制台 UTF-8 编码支持
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
 import numpy as np
 import pandas as pd

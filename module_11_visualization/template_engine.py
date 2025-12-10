@@ -62,8 +62,8 @@ class RenderResult:
 class TemplateEngine:
     """模板引擎类"""
 
-    DEFAULT_TEMPLATE_DIR = "module_11_visualization/templates"
-    DEFAULT_STATIC_DIR = "module_11_visualization/static"
+    DEFAULT_TEMPLATE_DIR = os.path.join("module_11_visualization", "templates")
+    DEFAULT_STATIC_DIR = os.path.join("module_11_visualization", "static")
 
     BUILTIN_FILTERS = {
         "currency": lambda x: f"${x:,.2f}",

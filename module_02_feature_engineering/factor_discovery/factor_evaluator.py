@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-因子评估器模块
-提供全面的因子评估和分析功能
-"""
-
-import warnings
-
-warnings.filterwarnings("ignore")
+"""因子评估器模块
+提供全面的因子评估和分析功能。"""
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
+
+warnings.filterwarnings("ignore")
+
+logger = logging.getLogger(__name__)
 
 try:
     from scipy import stats
 except ImportError:
     stats = None
-    logger.warning("scipy not available. Some statistical functions will be limited.")  # noqa: F821
-import sqlite3
-
-logger = logging.getLogger(__name__)
+    logger.warning("scipy not available. Some statistical functions will be limited.")
 
 
 @dataclass

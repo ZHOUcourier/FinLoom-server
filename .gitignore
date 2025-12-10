@@ -256,7 +256,6 @@ uv.lock
 
 # Project specific
 # Data files
-data/
 *.csv
 *.parquet
 *.h5
@@ -484,3 +483,5 @@ interactive_charts/
 visualization_output/
 
 .qoder/
+node_modules/
+generated_strategies

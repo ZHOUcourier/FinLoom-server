@@ -51,7 +51,7 @@ class TestVisualization:
         self.interactive_viz = InteractiveVisualizer()
         self.report_builder = ReportBuilder()
         self.export_mgr = ExportManager(
-            default_output_dir="module_11_visualization/reports/test"
+            default_output_dir=os.path.join("module_11_visualization", "reports", "test")
         )
         self.vis_db = get_visualization_database_manager()
 
@@ -114,7 +114,7 @@ class TestVisualization:
             logger.info(f"  ✓ K线图生成成功")
 
             # 保存图表
-            output_file = "module_11_visualization/reports/test/candlestick_test.html"
+            output_file = os.path.join("module_11_visualization", "reports", "test", "candlestick_test.html")
             os.makedirs(os.path.dirname(output_file), exist_ok=True)
             success = self.chart_gen.save_chart(candlestick, output_file, format="html")
             logger.info(f"  ✓ K线图已保存: {output_file}")
@@ -180,8 +180,8 @@ class TestVisualization:
             logger.info(f"  ✓ 交互式K线图生成成功")
 
             # 导出HTML
-            output_file = (
-                "module_11_visualization/reports/test/interactive_chart_test.html"
+            output_file = os.path.join(
+                "module_11_visualization", "reports", "test", "interactive_chart_test.html"
             )
             success = self.interactive_viz.export_interactive_html(
                 interactive_chart, output_file

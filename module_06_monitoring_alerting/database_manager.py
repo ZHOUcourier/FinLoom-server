@@ -18,12 +18,15 @@ logger = setup_logger("monitoring_database")
 class MonitoringDatabaseManager:
     """监控数据库管理器类"""
 
-    def __init__(self, db_path: str = "data/module06_monitoring.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module06_monitoring.db")
         self.db_path = db_path
         self._ensure_database_exists()
         self._initialize_tables()

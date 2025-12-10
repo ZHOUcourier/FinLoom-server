@@ -1,13 +1,6 @@
 # Module 10 - AI交互模块配置文件
 
-# FIN-R1模型配置
-fin_r1:
-  model_path: ".Fin-R1"  # 模型路径
-  device: "cpu"  # 使用设备: cpu/cuda
-  batch_size: 32
-  max_length: 512
-  temperature: 0.7
-  confidence_threshold: 0.6
+# FIN-R1模型相关配置已移除，现在统一使用阿里云AI服务
 
 # NLP处理器配置
 nlp:

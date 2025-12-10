@@ -23,8 +23,11 @@ logger = setup_logger("ai_model_database")
 class AIModelDatabaseManager:
     """AI模型数据库管理器"""
 
-    def __init__(self, db_path: str = "data/module03_ai_models.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器"""
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module03_ai_models.db")
         self.db_path = db_path
         self._ensure_db_directory()
         self._init_database()

@@ -94,6 +94,18 @@ __all__ = [
     "create_database_manager",
 ]
 
+# 数据管道协调器
+try:
+    from .data_pipeline_coordinator import (
+        DataPipelineCoordinator,
+        get_data_pipeline_coordinator,
+        fetch_all_market_intelligence_data,
+    )
+except ImportError:
+    DataPipelineCoordinator = None
+    get_data_pipeline_coordinator = None
+    fetch_all_market_intelligence_data = None
+
 # 添加可选模块到导出列表
 if ChineseAlternativeDataCollector is not None:
     __all__.append("ChineseAlternativeDataCollector")
@@ -107,6 +119,8 @@ if CacheManager is not None:
     __all__.append("CacheManager")
 if FileStorageManager is not None:
     __all__.append("FileStorageManager")
+if DataPipelineCoordinator is not None:
+    __all__.extend(["DataPipelineCoordinator", "get_data_pipeline_coordinator", "fetch_all_market_intelligence_data"])
 
 # 版本信息
 __version__ = "1.0.0"

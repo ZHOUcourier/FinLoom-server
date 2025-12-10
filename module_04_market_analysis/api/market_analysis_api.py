@@ -101,10 +101,11 @@ async def initialize_components():
         logger.info("Enhanced sentiment analyzer initialized")
 
 
-@router.on_event("startup")
-async def startup_event():
-    """启动事件"""
-    await initialize_components()
+# ❌ 移除自动启动初始化，改为延迟加载避免启动卡顿
+# @router.on_event("startup")
+# async def startup_event():
+#     """启动事件"""
+#     await initialize_components()
 
 
 @router.post("/sentiment/analyze", response_model=SentimentAnalysisResponse)

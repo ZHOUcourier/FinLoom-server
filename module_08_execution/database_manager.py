@@ -19,12 +19,15 @@ logger = setup_logger("module08_database")
 class ExecutionDatabaseManager:
     """执行模块数据库管理器"""
 
-    def __init__(self, db_path: str = "data/module08_execution.db"):
+    def __init__(self, db_path: str = None):
         """初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径
         """
+        if db_path is None:
+            import os
+            db_path = os.path.join("data", "module08_execution.db")
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 

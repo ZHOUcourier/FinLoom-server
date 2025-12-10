@@ -200,11 +200,14 @@ class AkshareDataCollector:
             # 返回空DataFrame而不是抛出异常
             return pd.DataFrame()
 
-    def fetch_realtime_data(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        """获取实时数据
+    def fetch_realtime_data(
+        self, symbols: List[str], max_retries: int = 3
+    ) -> Dict[str, Dict[str, Any]]:
+        """获取实时数据（带反爬虫策略和重试机制）
 
         Args:
             symbols: 股票代码列表
+            max_retries: 最大重试次数
 
         Returns:
             实时数据字典
@@ -231,37 +234,83 @@ class AkshareDataCollector:
                     }
                 return result
 
-            self._rate_limit_check()
+            # 应用反爬虫补丁
+            try:
+                from common.anti_spider_utils import patch_akshare_headers
 
-            # 获取实时行情
-            realtime_data = ak.stock_zh_a_spot_em()
+                patch_akshare_headers()
+            except Exception as e:
+                logger.debug(f"无法应用反爬虫补丁: {e}")
 
-            # 筛选指定股票
-            if symbols:
-                realtime_data = realtime_data[realtime_data["代码"].isin(symbols)]
+            # 带重试机制的数据获取
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        # 指数退避延迟
+                        import random
 
-            # 转换为字典格式
-            result = {}
-            for _, row in realtime_data.iterrows():
-                symbol = row["代码"]
-                result[symbol] = {
-                    "symbol": symbol,
-                    "name": row.get("名称", ""),
-                    "price": float(row.get("最新价", 0.0)),
-                    "change": float(row.get("涨跌幅", 0.0)),
-                    "change_amount": float(row.get("涨跌额", 0.0)),
-                    "volume": int(row.get("成交量", 0)),
-                    "amount": float(row.get("成交额", 0.0)),
-                    "high": float(row.get("最高", 0.0)),
-                    "low": float(row.get("最低", 0.0)),
-                    "open": float(row.get("今开", 0.0)),
-                    "close": float(row.get("昨收", 0.0)),
-                    "timestamp": datetime.now(),
-                }
+                        delay = (2**attempt) + random.uniform(0, 1)
+                        logger.info(f"等待 {delay:.2f} 秒后重试获取实时数据...")
+                        time.sleep(delay)
 
-            logger.info(f"Fetched realtime data for {len(result)} stocks")
-            return result
+                    self._rate_limit_check()
 
+                    # 获取实时行情
+                    realtime_data = ak.stock_zh_a_spot_em()
+
+                    if realtime_data.empty:
+                        logger.warning("获取到的实时数据为空")
+                        continue
+
+                    # 筛选指定股票
+                    if symbols:
+                        realtime_data = realtime_data[
+                            realtime_data["代码"].isin(symbols)
+                        ]
+
+                    # 转换为字典格式
+                    result = {}
+                    for _, row in realtime_data.iterrows():
+                        symbol = row["代码"]
+                        result[symbol] = {
+                            "symbol": symbol,
+                            "name": row.get("名称", ""),
+                            "price": float(row.get("最新价", 0.0)),
+                            "change": float(row.get("涨跌幅", 0.0)),
+                            "change_amount": float(row.get("涨跌额", 0.0)),
+                            "volume": int(row.get("成交量", 0)),
+                            "amount": float(row.get("成交额", 0.0)),
+                            "high": float(row.get("最高", 0.0)),
+                            "low": float(row.get("最低", 0.0)),
+                            "open": float(row.get("今开", 0.0)),
+                            "close": float(row.get("昨收", 0.0)),
+                            "timestamp": datetime.now(),
+                        }
+
+                    logger.info(f"Fetched realtime data for {len(result)} stocks")
+                    return result
+
+                except Exception as e:
+                    last_exception = e
+                    logger.warning(
+                        f"获取实时数据第 {attempt + 1}/{max_retries} 次失败: {e}"
+                    )
+                    if attempt == max_retries - 1:
+                        # 最后一次尝试失败，抛出异常
+                        raise DataError(
+                            f"Realtime data fetch failed after {max_retries} retries: {e}"
+                        )
+
+            # 不应该到达这里，但为了安全
+            if last_exception:
+                raise DataError(f"Realtime data fetch failed: {last_exception}")
+
+            return {}
+
+        except DataError:
+            # 直接抛出DataError
+            raise
         except Exception as e:
             logger.error(f"Failed to fetch realtime data: {e}")
             raise DataError(f"Realtime data fetch failed: {e}")
